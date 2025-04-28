@@ -1,6 +1,5 @@
 #include "domain/FinanceDataStructures.h"
 #include "domain/IFinanceRepository.h"
-#include "domain/IPacketHandler.h"
 #include "application/FinanceService.h"
 #include "infrastructure/storage/RedisSummaryAdapter.h"
 #include "infrastructure/storage/AreaBranchAdapter.h"

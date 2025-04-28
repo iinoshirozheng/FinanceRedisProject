@@ -5,6 +5,7 @@
 #include <optional>
 #include <memory>
 #include "../../domain/FinanceDataStructures.h"
+#include "../../domain/IFinanceRepository.h"
 #include <hiredis/hiredis.h>
 
 // Forward declare redisContext from hiredis
@@ -20,7 +21,7 @@ namespace finance
             /**
              * @brief Adapter for storing and retrieving summary data with Redis using hiredis
              */
-            class RedisSummaryAdapter
+            class RedisSummaryAdapter : public domain::IFinanceRepository<domain::SummaryData>
             {
             public:
                 /**
@@ -35,46 +36,15 @@ namespace finance
                  */
                 ~RedisSummaryAdapter();
 
-                /**
-                 * @brief Save a summary to Redis
-                 * @param summary The summary to save
-                 * @return true if successful, false otherwise
-                 */
-                bool saveSummary(const finance::domain::SummaryData &summary);
-
-                /**
-                 * @brief Get a summary by area center
-                 * @param areaCenter The area center to look up
-                 * @return The summary data if found
-                 */
-                std::optional<finance::domain::SummaryData> getSummary(const std::string &areaCenter);
-
-                /**
-                 * @brief Update an existing summary
-                 * @param data The new summary data
-                 * @param areaCenter The area center to update
-                 * @return true if successful, false otherwise
-                 */
-                bool updateSummary(const finance::domain::SummaryData &data, const std::string &areaCenter);
-
-                /**
-                 * @brief Delete a summary
-                 * @param areaCenter The area center to delete
-                 * @return true if successful, false otherwise
-                 */
-                bool deleteSummary(const std::string &areaCenter);
-
-                /**
-                 * @brief Load all summary data
-                 * @return Vector of all summaries
-                 */
-                std::vector<finance::domain::SummaryData> loadAllData();
-
-                /**
-                 * @brief Create search index for efficient querying
-                 * @return true if successful, false otherwise
-                 */
-                bool createSearchIndex();
+                // IFinanceRepository interface implementation
+                bool save(const domain::SummaryData &data) override;
+                domain::SummaryData *get(const std::string &key) override;
+                bool update(const domain::SummaryData &data, const std::string &key) override;
+                bool remove(const std::string &key) override;
+                std::vector<domain::SummaryData> loadAll() override;
+                std::map<std::string, domain::SummaryData> getAllMapped() override;
+                std::vector<domain::SummaryData> getAllBySecondaryKey(const std::string &secondaryKey) override;
+                bool createIndex() override;
 
             private:
                 // Redis connection context
@@ -85,14 +55,14 @@ namespace finance
                  * @param summary The summary to serialize
                  * @return Serialized string representation
                  */
-                std::string serializeSummary(const finance::domain::SummaryData &summary);
+                std::string serializeSummary(const domain::SummaryData &summary);
 
                 /**
                  * @brief Deserialize reply to summary
                  * @param reply The Redis reply containing serialized data
                  * @return The deserialized summary if valid
                  */
-                std::optional<finance::domain::SummaryData> deserializeSummary(redisReply *reply);
+                std::optional<domain::SummaryData> deserializeSummary(redisReply *reply);
             };
         } // namespace storage
     } // namespace infrastructure

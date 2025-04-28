@@ -15,6 +15,7 @@ namespace finance
 
         // 金融數據儲存庫介面
         // 處理儲存和檢索金融摘要數據
+        template <typename Data>
         class IFinanceRepository
         {
         public:
@@ -24,52 +25,58 @@ namespace finance
             virtual ~IFinanceRepository() = default;
 
             /**
-             * @brief Save a summary
-             * @param summary The summary data to save
+             * @brief Save a data entity
+             * @param data The data entity to save
              * @return true if saved successfully, false otherwise
              */
-            virtual bool saveSummary(const SummaryData &summary) = 0;
+            virtual bool save(const Data &data) = 0;
 
             /**
-             * @brief Get a summary by area center
-             * @param areaCenter The area center identifier
-             * @return The summary data if found, otherwise std::nullopt
+             * @brief Retrieve a data entity by key
+             * @param key The key to identify the entity
+             * @return The data entity if found, otherwise std::nullopt
              */
-            virtual std::optional<SummaryData> getSummary(const std::string &areaCenter) = 0;
+            virtual Data *get(const std::string &key) = 0;
 
             /**
-             * @brief Update a summary
-             * @param data The updated summary data
-             * @param areaCenter The area center identifier
+             * @brief Update a data entity
+             * @param data The updated data entity
+             * @param key The key to identify the entity
              * @return true if updated successfully, false otherwise
              */
-            virtual bool updateSummary(const SummaryData &data, const std::string &areaCenter) = 0;
+            virtual bool update(const Data &data, const std::string &key) = 0;
 
             /**
-             * @brief Delete a summary
-             * @param areaCenter The area center identifier
+             * @brief Delete a data entity
+             * @param key The key to identify the entity
              * @return true if deleted successfully, false otherwise
              */
-            virtual bool deleteSummary(const std::string &areaCenter) = 0;
+            virtual bool remove(const std::string &key) = 0;
 
             /**
-             * @brief Load all summary data
-             * @return Vector of all summary data
+             * @brief Load all data entities
+             * @return Vector of all data entities
              */
-            virtual std::vector<SummaryData> loadAllData() = 0;
+            virtual std::vector<Data> loadAll() = 0;
 
-            // 檢索所有摘要數據，以鍵值映射返回
-            // @return 所有摘要數據的映射
-            virtual std::map<std::string, SummaryData> getAllSummaries() = 0;
+            /**
+             * @brief Retrieve all data as a key-value mapping
+             * @return A map of all data entities
+             */
+            virtual std::map<std::string, Data> getAllMapped() = 0;
 
-            // 檢索特定股票的所有摘要數據
-            // @param stockId 股票ID
-            // @return 該股票的所有摘要數據
-            virtual std::vector<SummaryData> getAllSummaries(const std::string &stockId) = 0;
+            /**
+             * @brief Retrieve all summarized data by a specific secondary key
+             * @param secondaryKey The secondary key (e.g., stock ID or area center)
+             * @return A vector of all data entities matching the secondary key
+             */
+            virtual std::vector<Data> getAllBySecondaryKey(const std::string &secondaryKey) = 0;
 
-            // 創建搜索索引以實現高效查詢
-            // @return 如果索引建立成功則返回 true
-            virtual bool createSearchIndex() = 0;
+            /**
+             * @brief Create a search index for efficient queries
+             * @return true if the index was created successfully, false otherwise
+             */
+            virtual bool createIndex() = 0;
         };
 
         // 提供配置數據的介面

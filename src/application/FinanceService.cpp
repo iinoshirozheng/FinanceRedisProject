@@ -1,5 +1,5 @@
 #include "FinanceService.h"
-#include "../domain/FinanceUtils.hpp"
+#include "../common/FinanceUtils.hpp"
 #include "../infrastructure/network/FinanceBillHandler.h"
 #include <iostream>
 #include <algorithm>

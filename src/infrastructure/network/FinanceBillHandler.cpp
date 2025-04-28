@@ -1,6 +1,6 @@
 #include "FinanceBillHandler.h"
-#include "../../domain/FinanceUtils.hpp"
-#include <boost/algorithm/string.hpp>
+#include "../../common/FinanceUtils.hpp"
+#include "../../domain/FinanceDataStructures.h"
 #include <Poco/DateTime.h>
 #include <Poco/Timezone.h>
 
@@ -15,46 +15,44 @@ namespace finance
             {
             }
 
-            bool FinanceBillHandler::processBill(const domain::FinanceBill &bill)
+            bool FinanceBillHandler::processBill(const domain::FinanceBillMessage &bill)
             {
-                auto messageType = domain::FinanceUtils::determineMessageType(bill);
+                auto messageType = common::FinanceUtils::transactionMessageType(bill.t_code);
 
-                if (messageType == domain::MessageType::HCRTM01)
+                if (messageType == domain::MessageTransactionType::HCRTM01)
                 {
-                    domain::Hcrtm01Data hcrtm01;
+                    domain::HCRTM01_BillQuota hcrtm01;
                     // Convert bill to HCRTM01 data
-                    std::memcpy(hcrtm01.brokerId, bill.data.c_str(), sizeof(hcrtm01.brokerId));
-                    std::memcpy(hcrtm01.areaCenter, bill.data.c_str() + 4, sizeof(hcrtm01.areaCenter));
-                    std::memcpy(hcrtm01.stockId, bill.data.c_str() + 7, sizeof(hcrtm01.stockId));
-                    std::memcpy(hcrtm01.marginAmount, bill.data.c_str() + 13, sizeof(hcrtm01.marginAmount));
-                    std::memcpy(hcrtm01.marginBuyOrderAmount, bill.data.c_str() + 24, sizeof(hcrtm01.marginBuyOrderAmount));
-                    std::memcpy(hcrtm01.marginSellMatchAmount, bill.data.c_str() + 35, sizeof(hcrtm01.marginSellMatchAmount));
-                    std::memcpy(hcrtm01.marginQty, bill.data.c_str() + 46, sizeof(hcrtm01.marginQty));
-                    std::memcpy(hcrtm01.marginBuyOrderQty, bill.data.c_str() + 52, sizeof(hcrtm01.marginBuyOrderQty));
-                    std::memcpy(hcrtm01.marginSellMatchQty, bill.data.c_str() + 58, sizeof(hcrtm01.marginSellMatchQty));
-                    std::memcpy(hcrtm01.shortAmount, bill.data.c_str() + 64, sizeof(hcrtm01.shortAmount));
-                    std::memcpy(hcrtm01.shortSellOrderAmount, bill.data.c_str() + 75, sizeof(hcrtm01.shortSellOrderAmount));
-                    std::memcpy(hcrtm01.shortBuyMatchAmount, bill.data.c_str() + 86, sizeof(hcrtm01.shortBuyMatchAmount));
-                    std::memcpy(hcrtm01.shortQty, bill.data.c_str() + 97, sizeof(hcrtm01.shortQty));
-                    std::memcpy(hcrtm01.shortSellOrderQty, bill.data.c_str() + 103, sizeof(hcrtm01.shortSellOrderQty));
-                    std::memcpy(hcrtm01.shortBuyMatchQty, bill.data.c_str() + 109, sizeof(hcrtm01.shortBuyMatchQty));
+                    std::memcpy(hcrtm01.broker_id, bill.ap_data.data.hcrtm01.broker_id, sizeof(hcrtm01.broker_id));
+                    std::memcpy(hcrtm01.area_center, bill.ap_data.data.hcrtm01.area_center, sizeof(hcrtm01.area_center));
+                    std::memcpy(hcrtm01.stock_id, bill.ap_data.data.hcrtm01.stock_id, sizeof(hcrtm01.stock_id));
+                    std::memcpy(hcrtm01.margin_amount, bill.ap_data.data.hcrtm01.margin_amount, sizeof(hcrtm01.margin_amount));
+                    std::memcpy(hcrtm01.margin_buy_order_amount, bill.ap_data.data.hcrtm01.margin_buy_order_amount, sizeof(hcrtm01.margin_buy_order_amount));
+                    std::memcpy(hcrtm01.margin_sell_match_amount, bill.ap_data.data.hcrtm01.margin_sell_match_amount, sizeof(hcrtm01.margin_sell_match_amount));
+                    std::memcpy(hcrtm01.margin_qty, bill.ap_data.data.hcrtm01.margin_qty, sizeof(hcrtm01.margin_qty));
+                    std::memcpy(hcrtm01.margin_buy_order_qty, bill.ap_data.data.hcrtm01.margin_buy_order_qty, sizeof(hcrtm01.margin_buy_order_qty));
+                    std::memcpy(hcrtm01.margin_sell_match_qty, bill.ap_data.data.hcrtm01.margin_sell_match_qty, sizeof(hcrtm01.margin_sell_match_qty));
+                    std::memcpy(hcrtm01.short_amount, bill.ap_data.data.hcrtm01.short_amount, sizeof(hcrtm01.short_amount));
+                    std::memcpy(hcrtm01.short_sell_order_amount, bill.ap_data.data.hcrtm01.short_sell_order_amount, sizeof(hcrtm01.short_sell_order_amount));
+                    std::memcpy(hcrtm01.short_qty, bill.ap_data.data.hcrtm01.short_qty, sizeof(hcrtm01.short_qty));
+                    std::memcpy(hcrtm01.short_sell_order_qty, bill.ap_data.data.hcrtm01.short_sell_order_qty, sizeof(hcrtm01.short_sell_order_qty));
 
-                    return processData(hcrtm01, bill.systemHeader);
+                    return processData(hcrtm01, std::string(bill.ap_data.system, sizeof(bill.ap_data.system)));
                 }
-                else if (messageType == domain::MessageType::HCRTM05P)
+                else if (messageType == domain::MessageTransactionType::HCRTM05P)
                 {
-                    domain::Hcrtm05pData hcrtm05p;
+                    domain::HCRTM05P_BillQuota hcrtm05p;
                     // Convert bill to HCRTM05P data
-                    std::memcpy(hcrtm05p.brokerId, bill.data.c_str() + 1, sizeof(hcrtm05p.brokerId));
-                    std::memcpy(hcrtm05p.stockId, bill.data.c_str() + 4, sizeof(hcrtm05p.stockId));
-                    std::memcpy(hcrtm05p.financingCompany, bill.data.c_str() + 10, sizeof(hcrtm05p.financingCompany));
-                    std::memcpy(hcrtm05p.account, bill.data.c_str() + 14, sizeof(hcrtm05p.account));
-                    std::memcpy(hcrtm05p.marginBuyMatchQty, bill.data.c_str() + 21, sizeof(hcrtm05p.marginBuyMatchQty));
-                    std::memcpy(hcrtm05p.shortSellMatchQty, bill.data.c_str() + 27, sizeof(hcrtm05p.shortSellMatchQty));
-                    std::memcpy(hcrtm05p.dayTradeMarginMatchQty, bill.data.c_str() + 33, sizeof(hcrtm05p.dayTradeMarginMatchQty));
-                    std::memcpy(hcrtm05p.dayTradeShortMatchQty, bill.data.c_str() + 39, sizeof(hcrtm05p.dayTradeShortMatchQty));
-                    std::memcpy(hcrtm05p.marginBuyOffsetQty, bill.data.c_str() + 45, sizeof(hcrtm05p.marginBuyOffsetQty));
-                    std::memcpy(hcrtm05p.shortSellOffsetQty, bill.data.c_str() + 51, sizeof(hcrtm05p.shortSellOffsetQty));
+                    std::memcpy(hcrtm05p.broker_id, bill.ap_data.data.hcrtm05p.broker_id, sizeof(hcrtm05p.broker_id));
+                    std::memcpy(hcrtm05p.stock_id, bill.ap_data.data.hcrtm05p.stock_id, sizeof(hcrtm05p.stock_id));
+                    std::memcpy(hcrtm05p.financing_company, bill.ap_data.data.hcrtm05p.financing_company, sizeof(hcrtm05p.financing_company));
+                    std::memcpy(hcrtm05p.account, bill.ap_data.data.hcrtm05p.account, sizeof(hcrtm05p.account));
+                    std::memcpy(hcrtm05p.margin_buy_match_qty, bill.ap_data.data.hcrtm05p.margin_buy_match_qty, sizeof(hcrtm05p.margin_buy_match_qty));
+                    std::memcpy(hcrtm05p.short_sell_match_qty, bill.ap_data.data.hcrtm05p.short_sell_match_qty, sizeof(hcrtm05p.short_sell_match_qty));
+                    std::memcpy(hcrtm05p.day_trade_margin_match_qty, bill.ap_data.data.hcrtm05p.day_trade_margin_match_qty, sizeof(hcrtm05p.day_trade_margin_match_qty));
+                    std::memcpy(hcrtm05p.day_trade_short_match_qty, bill.ap_data.data.hcrtm05p.day_trade_short_match_qty, sizeof(hcrtm05p.day_trade_short_match_qty));
+                    std::memcpy(hcrtm05p.margin_buy_offset_qty, bill.ap_data.data.hcrtm05p.margin_buy_offset_qty, sizeof(hcrtm05p.margin_buy_offset_qty));
+                    std::memcpy(hcrtm05p.short_sell_offset_qty, bill.ap_data.data.hcrtm05p.short_sell_offset_qty, sizeof(hcrtm05p.short_sell_offset_qty));
 
                     return processData(hcrtm05p);
                 }
@@ -62,7 +60,7 @@ namespace finance
                 return false;
             }
 
-            bool FinanceBillHandler::processData(const domain::Hcrtm01Data &hcrtm01, const std::string &systemHeader)
+            bool FinanceBillHandler::processData(const domain::HCRTM01_BillQuota &hcrtm01, const std::string &systemHeader)
             {
                 try
                 {
@@ -75,7 +73,7 @@ namespace finance
                 }
             }
 
-            bool FinanceBillHandler::processData(const domain::Hcrtm05pData &hcrtm05p)
+            bool FinanceBillHandler::processData(const domain::HCRTM05P_BillQuota &hcrtm05p)
             {
                 try
                 {
@@ -88,30 +86,30 @@ namespace finance
                 }
             }
 
-            void FinanceBillHandler::handleHcrtm01(const domain::Hcrtm01Data &hcrtm01, const std::string &systemHeader)
+            void FinanceBillHandler::handleHcrtm01(const domain::HCRTM01_BillQuota &hcrtm01, const std::string &systemHeader)
             {
                 // Create summary data from HCRTM01
                 domain::SummaryData summary;
-                summary.stockId = std::string(hcrtm01.stockId, sizeof(hcrtm01.stockId));
-                summary.areaCenter = std::string(hcrtm01.areaCenter, sizeof(hcrtm01.areaCenter));
+                summary.stockId = std::string(hcrtm01.stock_id, sizeof(hcrtm01.stock_id));
+                summary.areaCenter = std::string(hcrtm01.area_center, sizeof(hcrtm01.area_center));
 
                 // Calculate available amounts
-                auto marginAmount = domain::FinanceUtils::backOfficeToInt(std::string(hcrtm01.marginAmount, sizeof(hcrtm01.marginAmount)));
-                auto marginBuyOrderAmount = domain::FinanceUtils::backOfficeToInt(std::string(hcrtm01.marginBuyOrderAmount, sizeof(hcrtm01.marginBuyOrderAmount)));
-                auto marginSellMatchAmount = domain::FinanceUtils::backOfficeToInt(std::string(hcrtm01.marginSellMatchAmount, sizeof(hcrtm01.marginSellMatchAmount)));
-                auto marginQty = domain::FinanceUtils::backOfficeToInt(std::string(hcrtm01.marginQty, sizeof(hcrtm01.marginQty)));
-                auto marginBuyOrderQty = domain::FinanceUtils::backOfficeToInt(std::string(hcrtm01.marginBuyOrderQty, sizeof(hcrtm01.marginBuyOrderQty)));
-                auto marginSellMatchQty = domain::FinanceUtils::backOfficeToInt(std::string(hcrtm01.marginSellMatchQty, sizeof(hcrtm01.marginSellMatchQty)));
-                auto shortAmount = domain::FinanceUtils::backOfficeToInt(std::string(hcrtm01.shortAmount, sizeof(hcrtm01.shortAmount)));
-                auto shortSellOrderAmount = domain::FinanceUtils::backOfficeToInt(std::string(hcrtm01.shortSellOrderAmount, sizeof(hcrtm01.shortSellOrderAmount)));
-                auto shortQty = domain::FinanceUtils::backOfficeToInt(std::string(hcrtm01.shortQty, sizeof(hcrtm01.shortQty)));
-                auto shortSellOrderQty = domain::FinanceUtils::backOfficeToInt(std::string(hcrtm01.shortSellOrderQty, sizeof(hcrtm01.shortSellOrderQty)));
+                auto margin_amount = common::FinanceUtils::backOfficeToInt(hcrtm01.margin_amount, sizeof(hcrtm01.margin_amount));
+                auto margin_buy_order_amount = common::FinanceUtils::backOfficeToInt(hcrtm01.margin_buy_order_amount, sizeof(hcrtm01.margin_buy_order_amount));
+                auto margin_sell_match_amount = common::FinanceUtils::backOfficeToInt(hcrtm01.margin_sell_match_amount, sizeof(hcrtm01.margin_sell_match_amount));
+                auto margin_qty = common::FinanceUtils::backOfficeToInt(hcrtm01.margin_qty, sizeof(hcrtm01.margin_qty));
+                auto margin_buy_order_qty = common::FinanceUtils::backOfficeToInt(hcrtm01.margin_buy_order_qty, sizeof(hcrtm01.margin_buy_order_qty));
+                auto margin_sell_match_qty = common::FinanceUtils::backOfficeToInt(hcrtm01.margin_sell_match_qty, sizeof(hcrtm01.margin_sell_match_qty));
+                auto short_amount = common::FinanceUtils::backOfficeToInt(hcrtm01.short_amount, sizeof(hcrtm01.short_amount));
+                auto short_sell_order_amount = common::FinanceUtils::backOfficeToInt(hcrtm01.short_sell_order_amount, sizeof(hcrtm01.short_sell_order_amount));
+                auto short_qty = common::FinanceUtils::backOfficeToInt(hcrtm01.short_qty, sizeof(hcrtm01.short_qty));
+                auto short_sell_order_qty = common::FinanceUtils::backOfficeToInt(hcrtm01.short_sell_order_qty, sizeof(hcrtm01.short_sell_order_qty));
 
                 // Calculate available amounts
-                summary.marginAvailableAmount = marginAmount - marginBuyOrderAmount + marginSellMatchAmount;
-                summary.marginAvailableQty = marginQty - marginBuyOrderQty + marginSellMatchQty;
-                summary.shortAvailableAmount = shortAmount - shortSellOrderAmount;
-                summary.shortAvailableQty = shortQty - shortSellOrderQty;
+                summary.marginAvailableAmount = margin_amount - margin_buy_order_amount + margin_sell_match_amount;
+                summary.marginAvailableQty = margin_qty - margin_buy_order_qty + margin_sell_match_qty;
+                summary.shortAvailableAmount = short_amount - short_sell_order_amount;
+                summary.shortAvailableQty = short_qty - short_sell_order_qty;
 
                 // Save or update the summary
                 if (!service->saveSummary(summary))
@@ -123,16 +121,16 @@ namespace finance
                 updateCompanySummary(summary.stockId);
             }
 
-            void FinanceBillHandler::handleHcrtm05p(const domain::Hcrtm05pData &hcrtm05p)
+            void FinanceBillHandler::handleHcrtm05p(const domain::HCRTM05P_BillQuota &hcrtm05p)
             {
                 // Create summary data from HCRTM05P
                 domain::SummaryData summary;
-                summary.stockId = std::string(hcrtm05p.stockId, sizeof(hcrtm05p.stockId));
-                summary.areaCenter = std::string(hcrtm05p.brokerId, sizeof(hcrtm05p.brokerId));
+                summary.stockId = std::string(hcrtm05p.stock_id, sizeof(hcrtm05p.stock_id));
+                summary.areaCenter = std::string(hcrtm05p.broker_id, sizeof(hcrtm05p.broker_id));
 
                 // Calculate offset quantities
-                auto marginBuyOffsetQty = domain::FinanceUtils::backOfficeToInt(std::string(hcrtm05p.marginBuyOffsetQty, sizeof(hcrtm05p.marginBuyOffsetQty)));
-                auto shortSellOffsetQty = domain::FinanceUtils::backOfficeToInt(std::string(hcrtm05p.shortSellOffsetQty, sizeof(hcrtm05p.shortSellOffsetQty)));
+                auto margin_buy_offset_qty = common::FinanceUtils::backOfficeToInt(hcrtm05p.margin_buy_offset_qty, sizeof(hcrtm05p.margin_buy_offset_qty));
+                auto short_sell_offset_qty = common::FinanceUtils::backOfficeToInt(hcrtm05p.short_sell_offset_qty, sizeof(hcrtm05p.short_sell_offset_qty));
 
                 // Get existing data if available
                 auto existingSummary = service->getSummary(summary.areaCenter);
@@ -143,10 +141,10 @@ namespace finance
                 }
 
                 // Update quantities
-                summary.marginAvailableQty += marginBuyOffsetQty;
-                summary.shortAvailableQty += shortSellOffsetQty;
-                summary.afterMarginAvailableQty += marginBuyOffsetQty;
-                summary.afterShortAvailableQty += shortSellOffsetQty;
+                summary.marginAvailableQty += margin_buy_offset_qty;
+                summary.shortAvailableQty += short_sell_offset_qty;
+                summary.afterMarginAvailableQty += margin_buy_offset_qty;
+                summary.afterShortAvailableQty += short_sell_offset_qty;
 
                 // Save or update the summary
                 if (!service->saveSummary(summary))
@@ -158,97 +156,109 @@ namespace finance
                 updateAreaSummary(summary.areaCenter, summary.stockId);
             }
 
-            void FinanceBillHandler::updateAreaSummary(const std::string &branchId, const std::string &stockId)
+            void FinanceBillHandler::updateAreaSummary(const std::string &branch_id, const std::string &stock_id)
             {
                 // 1) Find the area center for this branch
-                auto areaCenter = service->getAreaBranchRepo()->getAreaForBranch(branchId);
-                if (areaCenter.empty())
+                auto area_center = service->getAreaBranchRepo()->getAreaForBranch(branch_id);
+                if (area_center.empty())
                     return;
 
                 // 2) Construct area-level key
-                std::string areaKey = "summary:" + areaCenter + ":" + stockId;
+                std::string area_key = "summary:" + area_center + ":" + stock_id;
 
                 // 3) Get existing area summary or create new one
-                domain::SummaryData areaSummary;
-                auto existingAreaSummary = service->getSummary(areaKey);
+                domain::SummaryData area_summary;
+                auto existingAreaSummary = service->getSummary(area_key);
                 if (existingAreaSummary)
                 {
-                    areaSummary = *existingAreaSummary;
+                    area_summary = *existingAreaSummary;
                 }
 
                 // 4) Set meta fields
-                areaSummary.stockId = stockId;
-                areaSummary.areaCenter = areaCenter;
+                area_summary.stockId = stock_id;
+                area_summary.areaCenter = area_center;
 
                 // 5) Get all branches for this area and sum up their offsets
-                int64_t totalBuyOffset = 0;
-                int64_t totalShortOffset = 0;
-                auto branches = service->getAreaBranchRepo()->getBranchesForArea(areaCenter);
+                int64_t total_buy_offset = 0;
+                int64_t total_short_offset = 0;
+                auto branches = service->getAreaBranchRepo()->getBranchesForArea(area_center);
                 for (const auto &branch : branches)
                 {
-                    std::string branchKey = "summary:" + branch + ":" + stockId;
-                    auto branchSummary = service->getSummary(branchKey);
-                    if (branchSummary)
+                    std::string branch_key = "summary:" + branch + ":" + stock_id;
+                    auto branch_summary = service->getSummary(branch_key);
+                    if (branch_summary)
                     {
-                        totalBuyOffset += branchSummary->marginAvailableQty;
-                        totalShortOffset += branchSummary->shortAvailableQty;
+                        total_buy_offset += branch_summary->marginAvailableQty;
+                        total_short_offset += branch_summary->shortAvailableQty;
                     }
                 }
 
                 // 6) Update area summary with total offsets
-                areaSummary.marginAvailableQty = totalBuyOffset;
-                areaSummary.shortAvailableQty = totalShortOffset;
-                areaSummary.afterMarginAvailableQty = totalBuyOffset;
-                areaSummary.afterShortAvailableQty = totalShortOffset;
+                area_summary.marginAvailableQty = total_buy_offset;
+                area_summary.shortAvailableQty = total_short_offset;
+                area_summary.afterMarginAvailableQty = total_buy_offset;
+                area_summary.afterShortAvailableQty = total_short_offset;
 
                 // 7) Save area summary
-                if (!service->saveSummary(areaSummary))
+                if (!service->saveSummary(area_summary))
                 {
-                    service->updateSummary(areaSummary, areaKey);
+                    service->updateSummary(area_summary, area_key);
                 }
 
                 // 8) Update company-wide summary
-                updateCompanySummary(stockId);
+                updateCompanySummary(stock_id);
             }
 
-            void FinanceBillHandler::updateCompanySummary(const std::string &stockId)
+            void FinanceBillHandler::updateCompanySummary(const std::string &stock_id)
             {
                 // Get all summaries for this stock
                 auto summaries = service->getAllSummaries();
 
                 // Create company-wide summary
-                domain::SummaryData companySummary;
-                companySummary.stockId = stockId;
-                companySummary.areaCenter = "ALL";
+                domain::SummaryData company_summary;
+                company_summary.stockId = stock_id;
+                company_summary.areaCenter = "ALL";
 
                 // Aggregate data from all summaries
                 for (const auto &summary : summaries)
                 {
-                    if (summary.stockId == stockId)
+                    if (summary.stockId == stock_id)
                     {
-                        companySummary.marginAvailableAmount += summary.marginAvailableAmount;
-                        companySummary.marginAvailableQty += summary.marginAvailableQty;
-                        companySummary.shortAvailableAmount += summary.shortAvailableAmount;
-                        companySummary.shortAvailableQty += summary.shortAvailableQty;
-                        companySummary.afterMarginAvailableAmount += summary.afterMarginAvailableAmount;
-                        companySummary.afterMarginAvailableQty += summary.afterMarginAvailableQty;
-                        companySummary.afterShortAvailableAmount += summary.afterShortAvailableAmount;
-                        companySummary.afterShortAvailableQty += summary.afterShortAvailableQty;
+                        company_summary.marginAvailableAmount += summary.marginAvailableAmount;
+                        company_summary.marginAvailableQty += summary.marginAvailableQty;
+                        company_summary.shortAvailableAmount += summary.shortAvailableAmount;
+                        company_summary.shortAvailableQty += summary.shortAvailableQty;
+                        company_summary.afterMarginAvailableAmount += summary.afterMarginAvailableAmount;
+                        company_summary.afterMarginAvailableQty += summary.afterMarginAvailableQty;
+                        company_summary.afterShortAvailableAmount += summary.afterShortAvailableAmount;
+                        company_summary.afterShortAvailableQty += summary.afterShortAvailableQty;
                     }
                 }
 
                 // Save or update the company summary
-                if (!service->saveSummary(companySummary))
+                if (!service->saveSummary(company_summary))
                 {
-                    service->updateSummary(companySummary, companySummary.areaCenter);
+                    service->updateSummary(company_summary, company_summary.areaCenter);
                 }
             }
 
-            std::string FinanceBillHandler::extractString(const char *data, size_t size)
+            bool FinanceBillHandler::handleMessage(const char *data, size_t length)
             {
-                std::string result(data, size);
-                boost::algorithm::trim_right(result);
-                return result;
+                if (data == nullptr || length == 0)
+                {
+                    return false;
+                }
+
+                // Parse the message into a FinanceBillMessage
+                domain::FinanceBillMessage bill;
+                if (length < sizeof(bill))
+                {
+                    return false;
+                }
+                std::memcpy(&bill, data, sizeof(bill));
+
+                // Process the bill
+                return processBill(bill);
             }
 
         } // namespace network

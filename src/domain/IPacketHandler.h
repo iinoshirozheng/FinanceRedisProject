@@ -26,7 +26,7 @@ namespace finance
              * @param bill The financial bill to process
              * @return true if processing was successful, false otherwise
              */
-            virtual bool processBill(const FinanceBill &bill) = 0;
+            virtual bool processBill(const FinanceBillMessage &bill) = 0;
 
             /**
              * @brief Process data of a specific type
@@ -43,31 +43,31 @@ namespace finance
              * @param systemHeader The system header information
              * @return true if processing was successful, false otherwise
              */
-            virtual bool processData(const Hcrtm01Data &hcrtm01, const std::string &systemHeader) = 0;
+            virtual bool processData(const HCRTM01_BillQuota &hcrtm01, const std::string &systemHeader) = 0;
 
             /**
              * @brief Process HCRTM05P data
              * @param hcrtm05p The HCRTM05P data to process
              * @return true if processing was successful, false otherwise
              */
-            virtual bool processData(const Hcrtm05pData &hcrtm05p) = 0;
+            virtual bool processData(const HCRTM05P_BillQuota &hcrtm05p) = 0;
         };
 
         // Specialized implementations for different data types
         template <>
-        inline bool IPacketHandler::processData<Hcrtm01Data>(const Hcrtm01Data &data)
+        inline bool IPacketHandler::processData<HCRTM01_BillQuota>(const HCRTM01_BillQuota &data)
         {
             return processData(data, "");
         }
 
         template <>
-        inline bool IPacketHandler::processData<Hcrtm05pData>(const Hcrtm05pData &data)
+        inline bool IPacketHandler::processData<HCRTM05P_BillQuota>(const HCRTM05P_BillQuota &data)
         {
             return processData(data);
         }
 
         template <>
-        inline bool IPacketHandler::processData<FinanceBill>(const FinanceBill &data)
+        inline bool IPacketHandler::processData<FinanceBillMessage>(const FinanceBillMessage &data)
         {
             return processBill(data);
         }

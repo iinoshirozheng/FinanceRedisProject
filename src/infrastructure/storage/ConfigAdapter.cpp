@@ -39,9 +39,9 @@ namespace finance
                     json j;
                     file >> j;
 
-                    config_.redisUrl = j.value("redis_url", config_.redisUrl);
-                    config_.serverPort = j.value("server_port", config_.serverPort);
-                    config_.initializeIndices = j.value("initialize_indices", config_.initializeIndices);
+                    config_.redisUrl = j["redis_url"].get<std::string>();
+                    config_.serverPort = j["server_port"].get<int>();
+                    config_.initializeIndices = j["initialize_indices"].get<bool>();
 
                     LOG_F(INFO, "Loaded configuration: redis_url=%s, server_port=%d, initialize_indices=%d",
                           config_.redisUrl.c_str(), config_.serverPort, config_.initializeIndices);

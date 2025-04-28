@@ -20,15 +20,16 @@ namespace finance
             /**
              * @brief Implementation of the IPacketHandler interface for financial bills
              */
-            class FinanceBillHandler : public domain::IPacketHandler
+            class FinanceBillHandler : public domain::IPacketHandler, public domain::IFinanceBillHandler
             {
             public:
                 explicit FinanceBillHandler(std::shared_ptr<application::FinanceService> service);
                 ~FinanceBillHandler() override = default;
 
-                bool processBill(const domain::FinanceBill &bill) override;
-                bool processData(const domain::Hcrtm01Data &hcrtm01, const std::string &systemHeader) override;
-                bool processData(const domain::Hcrtm05pData &hcrtm05p) override;
+                bool processBill(const domain::FinanceBillMessage &bill) override;
+                bool processData(const domain::HCRTM01_BillQuota &hcrtm01, const std::string &systemHeader) override;
+                bool processData(const domain::HCRTM05P_BillQuota &hcrtm05p) override;
+                bool handleMessage(const char *data, size_t length) override;
 
             private:
                 std::shared_ptr<application::FinanceService> service;
@@ -37,10 +38,10 @@ namespace finance
                 std::vector<std::string> branches;
 
                 // Convert and handle HCRTM01 data
-                void handleHcrtm01(const domain::Hcrtm01Data &hcrtm01, const std::string &systemHeader);
+                void handleHcrtm01(const domain::HCRTM01_BillQuota &hcrtm01, const std::string &systemHeader);
 
                 // Convert and handle HCRTM05P data
-                void handleHcrtm05p(const domain::Hcrtm05pData &hcrtm05p);
+                void handleHcrtm05p(const domain::HCRTM05P_BillQuota &hcrtm05p);
 
                 // Update the company-wide summary for a stock ID
                 void updateCompanySummary(const std::string &stockId);
