@@ -5,72 +5,44 @@
 #include "../domain/IPacketHandler.h"
 #include "../infrastructure/storage/RedisSummaryAdapter.h"
 #include "../infrastructure/storage/AreaBranchAdapter.h"
+#include "../infrastructure/config/ConfigAdapter.hpp"
+#include "../infrastructure/network/TcpServiceAdapter.h"
 #include <memory>
 #include <string>
 #include <map>
 #include <mutex>
 #include <vector>
 #include <optional>
+#include <csignal>
+#include <thread>
 
 namespace finance
 {
     namespace application
     {
-        // Forward declarations
-        class FinanceServiceFactory;
 
         // Simple constructor for the basic FinanceService that only uses RedisSummaryAdapter
         class FinanceService
         {
         public:
             /**
-             * @brief Construct a new Finance Service object
-             * @param repository storage adapter for finance data
-             * @param areaBranchRepo area branch adapter
-             */
-            explicit FinanceService(
-                std::shared_ptr<finance::infrastructure::storage::RedisSummaryAdapter> repository,
-                std::shared_ptr<finance::infrastructure::storage::AreaBranchAdapter> areaBranchRepo = nullptr);
-
-            /**
-             * @brief Save a finance summary
-             * @param summary The summary data to save
+             * @brief Initialize the finance service
+             * @param argc Command line argument count
+             * @param argv Command line arguments
              * @return true if successful, false otherwise
              */
-            bool saveSummary(const domain::SummaryData &summary);
+            bool Initialize(int argc, char **argv);
 
             /**
-             * @brief Get a finance summary by area center
-             * @param areaCenter The area center to retrieve
-             * @return The summary data if found
-             */
-            std::optional<domain::SummaryData> getSummary(const std::string &areaCenter);
-
-            /**
-             * @brief Update an existing finance summary
-             * @param data The updated summary data
-             * @param areaCenter The area center to update
+             * @brief Run the finance service
              * @return true if successful, false otherwise
              */
-            bool updateSummary(const domain::SummaryData &data, const std::string &areaCenter);
+            bool Run();
 
             /**
-             * @brief Delete a finance summary
-             * @param areaCenter The area center to delete
-             * @return true if successful, false otherwise
+             * @brief Stop the finance service
              */
-            bool deleteSummary(const std::string &areaCenter);
-
-            /**
-             * @brief Get all finance summaries
-             * @return Vector of all summary data
-             */
-            std::vector<domain::SummaryData> getAllSummaries();
-
-            /**
-             * @brief Load all summary data
-             */
-            void loadAllSummaryData();
+            void Stop();
 
             /**
              * @brief Get the Area Branch Repository
@@ -84,28 +56,9 @@ namespace finance
         private:
             std::shared_ptr<finance::infrastructure::storage::RedisSummaryAdapter> repository;
             std::shared_ptr<finance::infrastructure::storage::AreaBranchAdapter> areaBranchRepo;
-        };
-
-        /**
-         * @brief Factory for creating finance service related objects
-         */
-        class FinanceServiceFactory
-        {
-        public:
-            /**
-             * @brief Construct a new Finance Service Factory object
-             * @param service The finance service instance
-             */
-            explicit FinanceServiceFactory(std::shared_ptr<FinanceService> service);
-
-            /**
-             * @brief Create a Finance Bill Handler object
-             * @return std::shared_ptr<domain::IFinanceBillHandler>
-             */
-            std::shared_ptr<domain::IFinanceBillHandler> createFinanceBillHandler();
-
-        private:
-            std::shared_ptr<FinanceService> service;
+            std::unique_ptr<infrastructure::network::TcpServiceAdapter> tcpService;
+            volatile std::sig_atomic_t signalStatus = 0;
+            domain::ConfigData config;
         };
     } // namespace application
 } // namespace finance

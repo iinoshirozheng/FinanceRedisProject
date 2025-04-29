@@ -2,34 +2,18 @@
 
 #include <string>
 #include <vector>
-#include <memory>
+#include <cstdint>
 
 namespace finance
 {
     namespace domain
     {
-        namespace FinanceConstants
-        {
-            constexpr size_t MAX_BUF_LEN = 409800;
-        }
-
         // 金融消息類型
         enum class MessageTransactionType
         {
             HCRTM01,
             HCRTM05P,
             OTHERS
-        };
-
-        /*  @ Struct Name: ConfigData
-        @ Description:
-            * 系統配置數據
-        */
-        struct ConfigData
-        {
-            std::string redisUrl;
-            int serverPort;
-            bool initializeIndices;
         };
 
         /*  @ Struct Name: SummaryData
@@ -49,15 +33,19 @@ namespace finance
             std::string stockId;
             std::string areaCenter;
             std::vector<std::string> belongBranches;
+
+            // 新增資買賣互抵張數 (temp data)
+            int64_t margin_buy_offset_qty;
+            int16_t short_sell_offset_qty;
         };
 
-        /* @ Struct Name: HCRTM01_BillQuota
+        /* @ Struct Name: MessageDataHCRTM01
         @ Description:
             * Transaction code ELD001-> HCRTM01
             - 描述交易代碼 ELD001 映射至 HCRTM01 的帳單額度數據結構。
             - 包含有關證券 融資券額度 與 成交金額 的詳細資料。
         */
-        struct HCRTM01_BillQuota
+        struct MessageDataHCRTM01
         {
             char broker_id[4];                           // 券商代號broker_id
             char area_center[3];                         // 區中心代號area_center
@@ -93,13 +81,13 @@ namespace finance
             char day_trade_short_sell_match_amount[11];  // 當沖券賣成交金額day_trade_short_sell_match_amount
         };
 
-        /*  @ Struct Name: HCRTM05P_BillQuota
+        /*  @ Struct Name: MessageDataHCRTM05P
         @ Description:
             * Transaction code ELD002-> HCRTM05P
             - 描述交易代碼 ELD002 映射至 HCRTM05P 的帳單額度數據結構。
             - 包含有關證券 資券成交張數 與 資券可互抵數 的詳細資料。
         */
-        struct HCRTM05P_BillQuota
+        struct MessageDataHCRTM05P
         {
             char dummy[1];                          // dummy
             char broker_id[2];                      // 券商代號 broker_id
@@ -127,7 +115,7 @@ namespace finance
         @ Description:
             * Ap Data
             - 包括文件操作、系統識別碼和交易詳細資料的元資料。
-            - 利用union存資料結構（`HCRTM01_BillQuota`、`HCRTM05P_BillQuota` 或原始緩衝區資料）。
+            - 利用union存資料結構（`MessageDataHCRTM01`、`MessageDataHCRTM05P` 或原始緩衝區資料）。
         */
         struct ApData
         {
@@ -142,9 +130,9 @@ namespace finance
 
             union
             {
-                HCRTM01_BillQuota hcrtm01;   // HCRTM01 資券個股額度檔
-                HCRTM05P_BillQuota hcrtm05p; // HCRTM05P 資券個股額度檔
-                char buffer[4000];           // 71~7000 Raw Data
+                MessageDataHCRTM01 hcrtm01;   // HCRTM01 資券個股額度檔
+                MessageDataHCRTM05P hcrtm05p; // HCRTM05P 資券個股額度檔
+                char buffer[4000];            // 71~7000 Raw Data
             } data;
         };
 
@@ -153,7 +141,7 @@ namespace finance
             * 傳輸完整電文
             - 包括輸入輸出、Transaction code和 來源主機(應改為CB) ，Ap資料。
         */
-        struct FinanceBillMessage
+        struct FinancePackageMessage
         {
             char p_code[4];     // 0200: Input, 0210: Output
             char t_code[6];     // 前3碼：系統代碼 末3碼：格式代碼 -> ELD001-> HCRTM01, ELD002-> HCRTM05P
@@ -163,12 +151,13 @@ namespace finance
             ApData ap_data;     // AP 資料
         };
 
-        class IFinanceBillHandler
+        // 配置數據
+        struct ConfigData
         {
-        public:
-            virtual ~IFinanceBillHandler() = default;
-            virtual bool handleMessage(const char *data, size_t length) = 0;
+            std::string redisUrl;
+            int serverPort;
+            bool initializeIndices = false;
         };
 
-    } // namespace domain
-} // namespace finance
+    }
+}

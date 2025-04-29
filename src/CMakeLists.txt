@@ -8,7 +8,10 @@ set(DOMAIN_HEADERS
     domain/FinanceDataStructures.h
     domain/IFinanceRepository.h
     domain/IPacketHandler.h
-    domain/FinanceUtils.hpp
+)
+
+set(COMMON_HEADERS
+    common/FinanceUtils.hpp
 )
 
 set(APPLICATION_SOURCES
@@ -18,12 +21,10 @@ set(APPLICATION_SOURCES
 set(INFRASTRUCTURE_STORAGE_SOURCES
     infrastructure/storage/RedisSummaryAdapter.cpp
     infrastructure/storage/AreaBranchAdapter.cpp
-    infrastructure/storage/ConfigAdapter.cpp
 )
 
 set(INFRASTRUCTURE_NETWORK_SOURCES
     infrastructure/network/TcpServiceAdapter.cpp
-    infrastructure/network/FinanceBillHandler.cpp
 )
 
 set(INFRASTRUCTURE_HEADERS
@@ -54,6 +55,7 @@ add_library(finance_lib STATIC
     ${THIRD_PARTY_SOURCES}
     ${INFRASTRUCTURE_HEADERS}
     ${DOMAIN_HEADERS}
+    ${COMMON_HEADERS}
 )
 
 target_link_libraries(finance_lib

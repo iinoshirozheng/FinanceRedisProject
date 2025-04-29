@@ -7,6 +7,7 @@
 #include <Poco/SharedPtr.h>
 
 #define CHECK_MARX_NEW new
+#define MAX_BUFFER_SIZE 4096
 
 namespace finance
 {
@@ -222,7 +223,7 @@ namespace finance
             {
                 try
                 {
-                    Poco::Buffer<char> buffer(domain::FinanceConstants::MAX_BUF_LEN);
+                    Poco::Buffer<char> buffer(MAX_BUFFER_SIZE);
 
                     while (true)
                     {
@@ -261,12 +262,11 @@ namespace finance
             // TcpServiceAdapter 實現
             TcpServiceAdapter::TcpServiceAdapter(
                 int port,
-                std::shared_ptr<domain::IFinanceBillHandler> billHandler)
-                : port_(port), billHandler_(billHandler), server_(nullptr)
+                std::shared_ptr<domain::IPackageHandler> packetHandler)
+                : port_(port), packetHandler_(packetHandler), server_(nullptr)
             {
                 packetQueue_ = std::make_shared<PacketQueue>();
-                packetDispatcher_ = std::make_shared<PacketDispatcher>(
-                    domain::FinanceConstants::MAX_BUF_LEN, packetQueue_);
+                packetDispatcher_ = std::make_shared<PacketDispatcher>(MAX_BUFFER_SIZE, packetQueue_);
             }
 
             TcpServiceAdapter::~TcpServiceAdapter()
@@ -335,12 +335,14 @@ namespace finance
                         return;
                     }
 
-                    // Pass the raw data to the bill handler
+                    // Pass the raw data to the packet handler
                     size_t dataLength = strlen(data);
                     LOG_F(INFO, "Processing packet with length %zu", dataLength);
 
-                    // Let the bill handler parse and process the data
-                    billHandler_->handleMessage(data, dataLength);
+                    // Let the packet handler parse and process the data
+                    domain::ApData apData;
+                    // TODO: Parse data into apData
+                    packetHandler_->processData(apData);
 
                     // Clean up
                     delete[] data;

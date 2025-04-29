@@ -1,7 +1,6 @@
 #include "RedisSummaryAdapter.h"
-#include <hiredis/hiredis.h>
-#include <sstream>
-#include <iostream>
+#include <nlohmann/json.hpp>
+#include <loguru.hpp>
 
 namespace finance
 {
@@ -9,22 +8,21 @@ namespace finance
     {
         namespace storage
         {
-            RedisSummaryAdapter::RedisSummaryAdapter(const std::string &host, int port)
-                : context(nullptr)
+            RedisSummaryAdapter::RedisSummaryAdapter(const std::string &redis_url)
             {
-                // Connect to Redis server
-                context = redisConnect(host.c_str(), port);
+                config_.redisUrl = redis_url;
+                context = redisConnect(redis_url.c_str(), 6379);
                 if (context == nullptr || context->err)
                 {
                     if (context)
                     {
-                        std::string error = context->errstr;
+                        LOG_F(ERROR, "Redis connection error: {}", context->errstr);
                         redisFree(context);
-                        throw std::runtime_error("Redis connection error: " + error);
+                        context = nullptr;
                     }
                     else
                     {
-                        throw std::runtime_error("Redis connection error: Cannot allocate Redis context");
+                        LOG_F(ERROR, "Redis connection error: can't allocate redis context");
                     }
                 }
             }
@@ -42,21 +40,37 @@ namespace finance
                 if (!context)
                     return false;
 
-                std::string key = "summary:" + data.areaCenter;
-                std::string value = serializeSummary(data);
-
-                redisReply *reply = static_cast<redisReply *>(
-                    redisCommand(context, "SET %s %s", key.c_str(), value.c_str()));
-
-                bool success = false;
-                if (reply)
+                try
                 {
-                    success = (reply->type == REDIS_REPLY_STATUS &&
-                               std::string(reply->str) == "OK");
-                    freeReplyObject(reply);
-                }
+                    nlohmann::json j;
+                    j["stock_id"] = data.stockId;
+                    j["area_center"] = data.areaCenter;
+                    j["margin_available_amount"] = data.marginAvailableAmount;
+                    j["margin_available_qty"] = data.marginAvailableQty;
+                    j["short_available_amount"] = data.shortAvailableAmount;
+                    j["short_available_qty"] = data.shortAvailableQty;
+                    j["after_margin_available_amount"] = data.afterMarginAvailableAmount;
+                    j["after_margin_available_qty"] = data.afterMarginAvailableQty;
+                    j["after_short_available_amount"] = data.afterShortAvailableAmount;
+                    j["after_short_available_qty"] = data.afterShortAvailableQty;
+                    j["belong_branches"] = data.belongBranches;
 
-                return success;
+                    std::string key = "summary:" + data.areaCenter + ":" + data.stockId;
+                    std::string json_str = j.dump();
+
+                    redisReply *reply = (redisReply *)redisCommand(context, "JSON.SET %s $ %s",
+                                                                   key.c_str(), json_str.c_str());
+
+                    bool success = (reply != nullptr && reply->type != REDIS_REPLY_ERROR);
+                    if (reply)
+                        freeReplyObject(reply);
+                    return success;
+                }
+                catch (const std::exception &ex)
+                {
+                    LOG_F(ERROR, "Redis save error: {}", ex.what());
+                    return false;
+                }
             }
 
             domain::SummaryData *RedisSummaryAdapter::get(const std::string &key)
@@ -64,30 +78,44 @@ namespace finance
                 if (!context)
                     return nullptr;
 
-                redisReply *reply = static_cast<redisReply *>(
-                    redisCommand(context, "GET %s", key.c_str()));
-
-                domain::SummaryData *result = nullptr;
-                if (reply)
+                try
                 {
-                    if (reply->type == REDIS_REPLY_STRING)
+                    redisReply *reply = (redisReply *)redisCommand(context, "JSON.GET %s $", key.c_str());
+                    if (!reply || reply->type == REDIS_REPLY_ERROR)
                     {
-                        auto summary = deserializeSummary(reply);
-                        if (summary)
-                        {
-                            result = new domain::SummaryData(*summary);
-                        }
+                        if (reply)
+                            freeReplyObject(reply);
+                        return nullptr;
                     }
-                    freeReplyObject(reply);
-                }
 
-                return result;
+                    nlohmann::json j = nlohmann::json::parse(reply->str);
+                    freeReplyObject(reply);
+
+                    auto *data = new domain::SummaryData();
+                    data->stockId = j[0]["stock_id"].get<std::string>();
+                    data->areaCenter = j[0]["area_center"].get<std::string>();
+                    data->marginAvailableAmount = j[0]["margin_available_amount"].get<int64_t>();
+                    data->marginAvailableQty = j[0]["margin_available_qty"].get<int64_t>();
+                    data->shortAvailableAmount = j[0]["short_available_amount"].get<int64_t>();
+                    data->shortAvailableQty = j[0]["short_available_qty"].get<int64_t>();
+                    data->afterMarginAvailableAmount = j[0]["after_margin_available_amount"].get<int64_t>();
+                    data->afterMarginAvailableQty = j[0]["after_margin_available_qty"].get<int64_t>();
+                    data->afterShortAvailableAmount = j[0]["after_short_available_amount"].get<int64_t>();
+                    data->afterShortAvailableQty = j[0]["after_short_available_qty"].get<int64_t>();
+                    data->belongBranches = j[0]["belong_branches"].get<std::vector<std::string>>();
+
+                    return data;
+                }
+                catch (const std::exception &ex)
+                {
+                    LOG_F(ERROR, "Redis get error: {}", ex.what());
+                    return nullptr;
+                }
             }
 
             bool RedisSummaryAdapter::update(const domain::SummaryData &data, const std::string &key)
             {
-                // In Redis, SET will overwrite existing key, so we can just use save
-                return save(data);
+                return save(data); // Redis JSON.SET will update if key exists
             }
 
             bool RedisSummaryAdapter::remove(const std::string &key)
@@ -95,146 +123,117 @@ namespace finance
                 if (!context)
                     return false;
 
-                redisReply *reply = static_cast<redisReply *>(
-                    redisCommand(context, "DEL %s", key.c_str()));
-
-                bool success = false;
+                redisReply *reply = (redisReply *)redisCommand(context, "DEL %s", key.c_str());
+                bool success = (reply != nullptr && reply->type != REDIS_REPLY_ERROR);
                 if (reply)
-                {
-                    success = (reply->type == REDIS_REPLY_INTEGER && reply->integer > 0);
                     freeReplyObject(reply);
-                }
-
                 return success;
             }
 
             std::vector<domain::SummaryData> RedisSummaryAdapter::loadAll()
             {
-                std::vector<domain::SummaryData> results;
-
+                std::vector<domain::SummaryData> result;
                 if (!context)
-                    return results;
+                    return result;
 
-                // Get all keys starting with "summary:"
-                redisReply *keysReply = static_cast<redisReply *>(
-                    redisCommand(context, "KEYS summary:*"));
-
-                if (!keysReply)
-                    return results;
-
-                if (keysReply->type == REDIS_REPLY_ARRAY)
+                try
                 {
-                    for (size_t i = 0; i < keysReply->elements; i++)
+                    redisReply *reply = (redisReply *)redisCommand(context, "KEYS summary:*");
+                    if (!reply || reply->type != REDIS_REPLY_ARRAY)
                     {
-                        std::string key = keysReply->element[i]->str;
+                        if (reply)
+                            freeReplyObject(reply);
+                        return result;
+                    }
 
-                        redisReply *dataReply = static_cast<redisReply *>(
-                            redisCommand(context, "GET %s", key.c_str()));
-
-                        if (dataReply && dataReply->type == REDIS_REPLY_STRING)
+                    for (size_t i = 0; i < reply->elements; i++)
+                    {
+                        std::string key = reply->element[i]->str;
+                        auto *data = get(key);
+                        if (data)
                         {
-                            auto summary = deserializeSummary(dataReply);
-                            if (summary)
-                            {
-                                results.push_back(*summary);
-                            }
-                        }
-
-                        if (dataReply)
-                        {
-                            freeReplyObject(dataReply);
+                            result.push_back(*data);
+                            delete data;
                         }
                     }
+                    freeReplyObject(reply);
                 }
-
-                freeReplyObject(keysReply);
-                return results;
+                catch (const std::exception &ex)
+                {
+                    LOG_F(ERROR, "Redis loadAll error: {}", ex.what());
+                }
+                return result;
             }
 
             std::map<std::string, domain::SummaryData> RedisSummaryAdapter::getAllMapped()
             {
-                std::map<std::string, domain::SummaryData> results;
-
+                std::map<std::string, domain::SummaryData> result;
                 if (!context)
-                    return results;
+                    return result;
 
-                // Get all keys starting with "summary:"
-                redisReply *keysReply = static_cast<redisReply *>(
-                    redisCommand(context, "KEYS summary:*"));
-
-                if (!keysReply)
-                    return results;
-
-                if (keysReply->type == REDIS_REPLY_ARRAY)
+                try
                 {
-                    for (size_t i = 0; i < keysReply->elements; i++)
+                    redisReply *reply = (redisReply *)redisCommand(context, "KEYS summary:*");
+                    if (!reply || reply->type != REDIS_REPLY_ARRAY)
                     {
-                        std::string key = keysReply->element[i]->str;
+                        if (reply)
+                            freeReplyObject(reply);
+                        return result;
+                    }
 
-                        redisReply *dataReply = static_cast<redisReply *>(
-                            redisCommand(context, "GET %s", key.c_str()));
-
-                        if (dataReply && dataReply->type == REDIS_REPLY_STRING)
+                    for (size_t i = 0; i < reply->elements; i++)
+                    {
+                        std::string key = reply->element[i]->str;
+                        auto *data = get(key);
+                        if (data)
                         {
-                            auto summary = deserializeSummary(dataReply);
-                            if (summary)
-                            {
-                                results[key] = *summary;
-                            }
-                        }
-
-                        if (dataReply)
-                        {
-                            freeReplyObject(dataReply);
+                            result[key] = *data;
+                            delete data;
                         }
                     }
+                    freeReplyObject(reply);
                 }
-
-                freeReplyObject(keysReply);
-                return results;
+                catch (const std::exception &ex)
+                {
+                    LOG_F(ERROR, "Redis getAllMapped error: {}", ex.what());
+                }
+                return result;
             }
 
             std::vector<domain::SummaryData> RedisSummaryAdapter::getAllBySecondaryKey(const std::string &secondaryKey)
             {
-                std::vector<domain::SummaryData> results;
-
+                std::vector<domain::SummaryData> result;
                 if (!context)
-                    return results;
+                    return result;
 
-                // Get all keys starting with "summary:"
-                redisReply *keysReply = static_cast<redisReply *>(
-                    redisCommand(context, "KEYS summary:*"));
-
-                if (!keysReply)
-                    return results;
-
-                if (keysReply->type == REDIS_REPLY_ARRAY)
+                try
                 {
-                    for (size_t i = 0; i < keysReply->elements; i++)
+                    std::string pattern = "summary:*:" + secondaryKey;
+                    redisReply *reply = (redisReply *)redisCommand(context, "KEYS %s", pattern.c_str());
+                    if (!reply || reply->type != REDIS_REPLY_ARRAY)
                     {
-                        std::string key = keysReply->element[i]->str;
+                        if (reply)
+                            freeReplyObject(reply);
+                        return result;
+                    }
 
-                        redisReply *dataReply = static_cast<redisReply *>(
-                            redisCommand(context, "GET %s", key.c_str()));
-
-                        if (dataReply && dataReply->type == REDIS_REPLY_STRING)
+                    for (size_t i = 0; i < reply->elements; i++)
+                    {
+                        std::string key = reply->element[i]->str;
+                        auto *data = get(key);
+                        if (data)
                         {
-                            auto summary = deserializeSummary(dataReply);
-                            if (summary && summary->stockId == secondaryKey)
-                            {
-                                results.push_back(*summary);
-                            }
-                        }
-
-                        if (dataReply)
-                        {
-                            freeReplyObject(dataReply);
+                            result.push_back(*data);
+                            delete data;
                         }
                     }
+                    freeReplyObject(reply);
                 }
-
-                freeReplyObject(keysReply);
-                return results;
+                catch (const std::exception &ex)
+                {
+                    LOG_F(ERROR, "Redis getAllBySecondaryKey error: {}", ex.what());
+                }
+                return result;
             }
 
             bool RedisSummaryAdapter::createIndex()
@@ -242,149 +241,28 @@ namespace finance
                 if (!context)
                     return false;
 
-                // This would typically create any Redis search indices necessary
-                // For now, just return true as a placeholder
-                return true;
-            }
-
-            std::string RedisSummaryAdapter::serializeSummary(const domain::SummaryData &summary)
-            {
-                std::stringstream ss;
-                ss << summary.areaCenter << "|"
-                   << summary.stockId << "|"
-                   << summary.marginAvailableAmount << "|"
-                   << summary.marginAvailableQty << "|"
-                   << summary.shortAvailableAmount << "|"
-                   << summary.shortAvailableQty << "|"
-                   << summary.afterMarginAvailableAmount << "|"
-                   << summary.afterMarginAvailableQty << "|"
-                   << summary.afterShortAvailableAmount << "|"
-                   << summary.afterShortAvailableQty;
-                return ss.str();
-            }
-
-            std::optional<domain::SummaryData> RedisSummaryAdapter::deserializeSummary(redisReply *reply)
-            {
-                if (!reply || reply->type != REDIS_REPLY_STRING)
-                {
-                    return std::nullopt;
-                }
-
-                std::string data(reply->str, reply->len);
-                std::stringstream ss(data);
-                std::string token;
-
-                domain::SummaryData summary;
-
-                // Parse areaCenter
-                if (!std::getline(ss, token, '|'))
-                    return std::nullopt;
-                summary.areaCenter = token;
-
-                // Parse stockId
-                if (!std::getline(ss, token, '|'))
-                    return std::nullopt;
-                summary.stockId = token;
-
-                // Parse marginAvailableAmount
-                if (!std::getline(ss, token, '|'))
-                    return std::nullopt;
                 try
                 {
-                    summary.marginAvailableAmount = std::stoll(token);
-                }
-                catch (const std::exception &e)
-                {
-                    return std::nullopt;
-                }
+                    redisReply *reply = (redisReply *)redisCommand(context,
+                                                                   "FT.CREATE outputIdx ON JSON PREFIX 1 summary: SCHEMA "
+                                                                   "$.stock_id AS stock_id TEXT "
+                                                                   "$.area_center AS area_center TEXT "
+                                                                   "$.belong_branches.* AS branches TAG");
 
-                // Parse marginAvailableQty
-                if (!std::getline(ss, token, '|'))
-                    return std::nullopt;
-                try
-                {
-                    summary.marginAvailableQty = std::stoll(token);
+                    bool success = (reply != nullptr && reply->type != REDIS_REPLY_ERROR);
+                    if (reply)
+                        freeReplyObject(reply);
+                    return success;
                 }
-                catch (const std::exception &e)
+                catch (const std::exception &ex)
                 {
-                    return std::nullopt;
+                    LOG_F(ERROR, "Redis createIndex error: {}", ex.what());
+                    return false;
                 }
-
-                // Parse shortAvailableAmount
-                if (!std::getline(ss, token, '|'))
-                    return std::nullopt;
-                try
-                {
-                    summary.shortAvailableAmount = std::stoll(token);
-                }
-                catch (const std::exception &e)
-                {
-                    return std::nullopt;
-                }
-
-                // Parse shortAvailableQty
-                if (!std::getline(ss, token, '|'))
-                    return std::nullopt;
-                try
-                {
-                    summary.shortAvailableQty = std::stoll(token);
-                }
-                catch (const std::exception &e)
-                {
-                    return std::nullopt;
-                }
-
-                // Parse afterMarginAvailableAmount
-                if (!std::getline(ss, token, '|'))
-                    return std::nullopt;
-                try
-                {
-                    summary.afterMarginAvailableAmount = std::stoll(token);
-                }
-                catch (const std::exception &e)
-                {
-                    return std::nullopt;
-                }
-
-                // Parse afterMarginAvailableQty
-                if (!std::getline(ss, token, '|'))
-                    return std::nullopt;
-                try
-                {
-                    summary.afterMarginAvailableQty = std::stoll(token);
-                }
-                catch (const std::exception &e)
-                {
-                    return std::nullopt;
-                }
-
-                // Parse afterShortAvailableAmount
-                if (!std::getline(ss, token, '|'))
-                    return std::nullopt;
-                try
-                {
-                    summary.afterShortAvailableAmount = std::stoll(token);
-                }
-                catch (const std::exception &e)
-                {
-                    return std::nullopt;
-                }
-
-                // Parse afterShortAvailableQty
-                if (!std::getline(ss, token))
-                    return std::nullopt;
-                try
-                {
-                    summary.afterShortAvailableQty = std::stoll(token);
-                }
-                catch (const std::exception &e)
-                {
-                    return std::nullopt;
-                }
-
-                return summary;
             }
 
         } // namespace storage
-    } // namespace infrastructure
-} // namespace finance
+
+    } // namespace finance
+
+} // namespace infrastructure

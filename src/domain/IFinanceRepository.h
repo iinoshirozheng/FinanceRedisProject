@@ -1,18 +1,14 @@
 #pragma once
 
-#include "FinanceDataStructures.h"
-#include <vector>
 #include <string>
-#include <optional>
+#include <vector>
 #include <map>
-#include <memory>
+#include "./FinanceDataStructures.h"
 
 namespace finance
 {
     namespace domain
     {
-        // Use SummaryData from FinanceTypes.h
-
         // 金融數據儲存庫介面
         // 處理儲存和檢索金融摘要數據
         template <typename Data>
@@ -79,7 +75,7 @@ namespace finance
             virtual bool createIndex() = 0;
         };
 
-        // 提供配置數據的介面
+        // 提供 Config 配置數據介面
         class IConfigProvider
         {
         public:
@@ -87,43 +83,17 @@ namespace finance
 
             // 獲取配置數據
             // @return 配置數據
-            virtual ConfigData getConfig() = 0;
+            virtual domain::ConfigData getConfig() = 0;
 
             // 從文件中載入配置
             // @param filePath 配置文件路徑
             // @return 如果載入成功則返回 true
             virtual bool loadFromFile(const std::string &filePath) = 0;
-        };
 
-        // 提供區域分支映射數據的介面
-        class IAreaBranchRepository
-        {
-        public:
-            virtual ~IAreaBranchRepository() = default;
-
-            // 從文件中載入區域分支映射
-            // @param filePath 配置文件路徑
-            // @return 如果載入成功則返回 true
-            virtual bool loadFromFile(const std::string &filePath) = 0;
-
-            // 獲取指定區域的所有分支 ID
-            // @param areaCenter 區域中心代碼
-            // @return 分支 ID 向量，如果區域未找到則返回空向量
-            virtual std::vector<std::string> getBranchesForArea(const std::string &areaCenter) = 0;
-
-            // 獲取指定分支 ID 的區域中心
-            // @param branchId 分支 ID
-            // @return 區域中心代碼，如果分支未找到則返回空字符串
-            virtual std::string getAreaForBranch(const std::string &branchId) = 0;
-
-            // 獲取所有區域中心代碼
-            // @return 所有區域中心代碼的向量
-            virtual std::vector<std::string> getAllAreas() = 0;
-
-            // 獲取所有分支 ID
-            // @return 所有分支 ID 的向量
-            virtual std::vector<std::string> getAllBranches() = 0;
+            // 確認是不是沒有 load 資料
+            virtual bool empty() = 0;
         };
 
     } // namespace domain
+
 } // namespace finance

@@ -180,9 +180,9 @@ namespace finance
                 /**
                  * 構造函數
                  * @param port 要監聽的端口
-                 * @param billHandler 金融票據的處理器
+                 * @param packetHandler 金融票據的處理器
                  */
-                TcpServiceAdapter(int port, std::shared_ptr<domain::IFinanceBillHandler> billHandler);
+                TcpServiceAdapter(int port, std::shared_ptr<domain::IPackageHandler> packetHandler);
 
                 /**
                  * 析構函數
@@ -202,7 +202,7 @@ namespace finance
 
             private:
                 int port_;
-                std::shared_ptr<domain::IFinanceBillHandler> billHandler_;
+                std::shared_ptr<domain::IPackageHandler> packetHandler_;
                 std::unique_ptr<Poco::Net::TCPServer> server_;
                 std::shared_ptr<PacketQueue> packetQueue_;
                 std::shared_ptr<PacketDispatcher> packetDispatcher_;
