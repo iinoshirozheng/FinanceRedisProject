@@ -111,7 +111,19 @@ namespace finance
             template <typename T>
             static std::string generateKey(const T &data)
             {
-                return "summary:" + data.areaCenter + ":" + data.stockId;
+                if constexpr (std::is_same_v<T, domain::SummaryData>)
+                {
+                    return "summary:" + data.areaCenter + ":" + data.stockId;
+                }
+                else if constexpr (std::is_same_v<T, std::string>)
+                {
+                    return data; // If it's already a string, return it as is
+                }
+                else
+                {
+                    static_assert(sizeof(T) == 0, "Unsupported type for generateKey");
+                    return "";
+                }
             }
 
             inline long long BackOfficeInt(const std::string &value)

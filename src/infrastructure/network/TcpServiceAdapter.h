@@ -3,15 +3,15 @@
 #include <Poco/Net/TCPServer.h>
 #include <Poco/Net/TCPServerConnection.h>
 #include <Poco/Net/TCPServerConnectionFactory.h>
+#include <Poco/Net/ServerSocket.h>
 #include <Poco/Net/StreamSocket.h>
-#include <Poco/Buffer.h>
-
-#include "../../domain/IPacketHandler.h"
-#include "PacketQueue.h"
+#include <Poco/Net/SocketAddress.h>
 #include <memory>
-#include <mutex>
 #include <thread>
 #include <atomic>
+#include "PacketQueue.h"
+#include "../../domain/FinanceDataStructure.h"
+#include "../../domain/IPacketHandler.h"
 
 namespace finance
 {
@@ -126,7 +126,7 @@ namespace finance
                  * @param port 要監聽的端口
                  * @param packetHandler 金融票據的處理器
                  */
-                TcpServiceAdapter(int port, std::shared_ptr<domain::IPackageHandler> packetHandler);
+                explicit TcpServiceAdapter(int port, std::shared_ptr<domain::IPackageHandler> handler);
 
                 /**
                  * 析構函數
@@ -145,17 +145,17 @@ namespace finance
                 void stop();
 
             private:
-                int port_;
-                std::shared_ptr<domain::IPackageHandler> packetHandler_;
-                std::unique_ptr<Poco::Net::TCPServer> server_;
-                std::shared_ptr<PacketQueue> packetQueue_;
-                std::shared_ptr<PacketDispatcher> packetDispatcher_;
+                void acceptLoop();
+                void handleClient(Poco::Net::StreamSocket socket);
+                bool receiveData(Poco::Net::StreamSocket &socket, char *buffer, int length);
 
-                /**
-                 * 處理金融票據數據包
-                 * @param data 數據包數據
-                 */
-                void processPacket(char *data);
+                Poco::Net::ServerSocket serverSocket_;
+                std::shared_ptr<domain::IPackageHandler> handler_;
+                std::atomic<bool> running_{false};
+                std::thread acceptThread_;
+                BoundedQueue<domain::FinancePackageMessage> messageQueue_;
+                static constexpr int SOCKET_TIMEOUT_MS = 1000;
+                static constexpr int MAX_QUEUE_SIZE = 1000;
             };
 
         } // namespace network

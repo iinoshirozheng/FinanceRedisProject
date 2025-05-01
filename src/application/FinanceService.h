@@ -3,7 +3,7 @@
 #include "../domain/FinanceDataStructure.h"
 #include "../domain/IFinanceRepository.h"
 #include "../domain/IPacketHandler.h"
-#include "../infrastructure/storage/RedisSummaryAdapter.h"
+#include "../domain/Status.h"
 #include "../infrastructure/config/AreaBranchProvider.hpp"
 #include "../infrastructure/config/ConnectionConfigProvider.hpp"
 #include "../infrastructure/network/TcpServiceAdapter.h"
@@ -15,34 +15,28 @@
 #include <optional>
 #include <csignal>
 #include <thread>
+#include <atomic>
 
 namespace finance
 {
     namespace application
     {
-
-        // Simple constructor for the basic FinanceService that only uses RedisSummaryAdapter
         class FinanceService
         {
         public:
-            /**
-             * @brief Initialize the finance service
-             * @param argc Command line argument count
-             * @param argv Command line arguments
-             * @return true if successful, false otherwise
-             */
-            bool Initialize(int argc, char **argv);
+            FinanceService(
+                std::shared_ptr<domain::IPackageHandler> packetHandler,
+                std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository,
+                std::shared_ptr<infrastructure::config::AreaBranchProvider> areaBranchProvider);
 
-            /**
-             * @brief Run the finance service
-             * @return true if successful, false otherwise
-             */
-            bool Run();
+            // Initialize the service with configuration
+            domain::Status initialize(const std::string &configPath);
 
-            /**
-             * @brief Stop the finance service
-             */
-            void Stop();
+            // Start the service main loop
+            domain::Status run();
+
+            // Stop the service gracefully
+            void shutdown();
 
             /**
              * @brief Get the Area Branch Repository
@@ -50,15 +44,15 @@ namespace finance
              */
             std::shared_ptr<infrastructure::config::AreaBranchProvider> getAreaBranchRepo() const
             {
-                return areaBranchRepo;
+                return areaBranchProvider_;
             }
 
         private:
-            std::shared_ptr<infrastructure::storage::RedisSummaryAdapter> repository;
-            std::shared_ptr<infrastructure::config::AreaBranchProvider> areaBranchRepo;
-            std::unique_ptr<infrastructure::network::TcpServiceAdapter> tcpService;
-            volatile std::sig_atomic_t signalStatus = 0;
-            std::unique_ptr<infrastructure::config::ConnectionConfigProvider> configProvider;
+            std::shared_ptr<domain::IPackageHandler> packetHandler_;
+            std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository_;
+            std::shared_ptr<infrastructure::config::AreaBranchProvider> areaBranchProvider_;
+            std::unique_ptr<infrastructure::network::TcpServiceAdapter> tcpService_;
+            std::atomic<int> signalStatus_{0};
         };
     } // namespace application
 } // namespace finance

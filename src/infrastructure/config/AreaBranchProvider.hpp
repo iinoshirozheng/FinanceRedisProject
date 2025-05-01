@@ -32,7 +32,7 @@ namespace finance
                     for (auto &[key, value] : JsonProviderBase::getJsonData().items())
                     {
                         // std::cout << "key:" << key << "value:" << value << std::endl;
-                        backoffice_ids.insert(key);
+                        backoffice_ids_.insert(key);
                         for (auto &branch : value)
                         {
                             auto branch_id = branch.get<std::string>();
@@ -40,6 +40,7 @@ namespace finance
                             allBranchs_.emplace_back(branch_id);
                         }
                     }
+                    return true;
                 }
 
                 std::string getAreaCenterByBranchId(const std::string &branchId) const
@@ -104,10 +105,33 @@ namespace finance
                     }
                 }
 
+                std::vector<std::string> getBranchesForArea(const std::string &areaCenter) const
+                {
+                    if (isJsonDataEmpty())
+                    {
+                        LOG_F(ERROR, "JSON data is empty");
+                        return {};
+                    }
+
+                    try
+                    {
+                        if (auto it = jsonData_.find(areaCenter); it != jsonData_.end())
+                        {
+                            return it->get<std::vector<std::string>>();
+                        }
+                        return {};
+                    }
+                    catch (const nlohmann::json::exception &e)
+                    {
+                        LOG_F(ERROR, "Failed to get branches for area %s: %s", areaCenter.c_str(), e.what());
+                        return {};
+                    }
+                }
+
             private:
                 std::map<std::string, std::string> followingBrokerIds_;
                 std::vector<std::string> allBranchs_;
-                std::set<std::string> backoffice_ids;
+                std::set<std::string> backoffice_ids_;
                 std::string redisUrl_;
             };
 

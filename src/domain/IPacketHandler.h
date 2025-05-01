@@ -1,15 +1,11 @@
 #pragma once
 
-#include <memory>
-#include <string>
 #include "./FinanceDataStructure.h"
-#include "../common/FinanceUtils.hpp"
 
 namespace finance
 {
     namespace domain
     {
-
         // 通用數據處理器介面，基於模板的方式
         class IPackageHandler
         {

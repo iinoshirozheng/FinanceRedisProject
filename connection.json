@@ -1,4 +1,4 @@
 {
-    "redis_url": "tcp://127.0.0.1:6479",
+    "redis_url": "tcp://127.0.0.1:6379",
     "server_port": 9516
 }

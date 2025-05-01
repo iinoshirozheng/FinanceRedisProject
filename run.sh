@@ -29,7 +29,7 @@ if [ $? -eq 0 ]; then
     if [[ "$answer" =~ ^[Yy] ]]; then
         echo "Running finance_manager..."
         cd ..
-        ./build/finance_manager "$@"
+        ./build/src/finance_manager "$@"
     else
         echo "Exiting without running the application."
     fi
