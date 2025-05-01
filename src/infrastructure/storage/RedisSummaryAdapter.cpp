@@ -14,7 +14,7 @@ namespace finance::infrastructure::storage
         auto status = connect();
         if (!status.isOk())
         {
-            LOG_F(ERROR, "Failed to connect to Redis: %s", status.message().c_str());
+            LOG_F(ERROR, "%s", status.toString().c_str());
         }
     }
 
@@ -29,21 +29,29 @@ namespace finance::infrastructure::storage
         {
             if (redisContext_)
             {
-                return domain::Status::ok();
+                return domain::Status::ok()
+                    .withOperation("connect")
+                    .withResponse("Already connected");
             }
 
             redisContext_ = redisConnect(configProvider_->getRedisUrl().c_str(), 6379);
             if (!redisContext_ || redisContext_->err)
             {
                 std::string error = redisContext_ ? redisContext_->errstr : "Failed to allocate Redis context";
-                return domain::Status::error(domain::Status::Code::CONNECTION_ERROR, error);
+                return domain::Status::error(domain::Status::Code::ConnectionError, error)
+                    .withOperation("connect")
+                    .withRequest(configProvider_->getRedisUrl());
             }
 
-            return domain::Status::ok();
+            return domain::Status::ok()
+                .withOperation("connect")
+                .withRequest(configProvider_->getRedisUrl());
         }
         catch (const std::exception &ex)
         {
-            return domain::Status::error(domain::Status::Code::CONNECTION_ERROR, ex.what());
+            return domain::Status::error(domain::Status::Code::ConnectionError, ex.what())
+                .withOperation("connect")
+                .withRequest(configProvider_->getRedisUrl());
         }
     }
 
@@ -65,6 +73,7 @@ namespace finance::infrastructure::storage
                 auto status = connect();
                 if (!status.isOk())
                 {
+                    LOG_F(ERROR, "%s", status.toString().c_str());
                     return false;
                 }
             }
@@ -73,20 +82,41 @@ namespace finance::infrastructure::storage
             std::string json = serializeSummaryData(data);
 
             redisReply *reply = (redisReply *)redisCommand(redisContext_, "SET %s %s", key.c_str(), json.c_str());
-            if (!reply)
+            std::string response = reply ? reply->str : "";
+
+            domain::Status status = reply && reply->type != REDIS_REPLY_ERROR
+                                        ? domain::Status::ok()
+                                              .withOperation("save")
+                                              .withKey(key)
+                                              .withRequest(json)
+                                              .withResponse(response)
+                                        : domain::Status::error(domain::Status::Code::RedisError, reply ? reply->str : "no reply")
+                                              .withOperation("save")
+                                              .withKey(key)
+                                              .withRequest(json)
+                                              .withResponse(response);
+
+            if (reply)
+                freeReplyObject(reply);
+
+            if (!status.isOk())
             {
-                return false;
+                LOG_F(ERROR, "%s", status.toString().c_str());
+            }
+            else
+            {
+                LOG_F(INFO, "%s", status.toString().c_str());
             }
 
-            freeReplyObject(reply);
-
-            // 更新 cache
+            // Update cache
             summaryCache_[key] = data;
-            return true;
+            return status.isOk();
         }
         catch (const std::exception &ex)
         {
-            LOG_F(ERROR, "Redis save error: %s", ex.what());
+            auto status = domain::Status::error(domain::Status::Code::RedisError, ex.what())
+                              .withOperation("save");
+            LOG_F(ERROR, "%s", status.toString().c_str());
             return false;
         }
     }
@@ -100,29 +130,57 @@ namespace finance::infrastructure::storage
                 auto status = connect();
                 if (!status.isOk())
                 {
+                    LOG_F(ERROR, "%s", status.toString().c_str());
                     return false;
                 }
             }
 
             redisReply *reply = (redisReply *)redisCommand(redisContext_, "GET %s", key.c_str());
+            std::string response = reply ? reply->str : "";
+
+            domain::Status status;
             if (!reply)
             {
-                return false;
+                status = domain::Status::error(domain::Status::Code::RedisError, "No reply")
+                             .withOperation("find")
+                             .withKey(key)
+                             .withResponse(response);
             }
-
-            if (reply->type == REDIS_REPLY_NIL)
+            else if (reply->type == REDIS_REPLY_NIL)
             {
-                freeReplyObject(reply);
-                return false;
+                status = domain::Status::error(domain::Status::Code::NotFound, "Key not found")
+                             .withOperation("find")
+                             .withKey(key)
+                             .withResponse(response);
+            }
+            else
+            {
+                status = deserializeSummaryData(reply->str, data);
+                status.withOperation("find")
+                    .withKey(key)
+                    .withResponse(response);
             }
 
-            auto status = deserializeSummaryData(reply->str, data);
-            freeReplyObject(reply);
+            if (reply)
+                freeReplyObject(reply);
+
+            if (!status.isOk())
+            {
+                LOG_F(ERROR, "%s", status.toString().c_str());
+            }
+            else
+            {
+                LOG_F(INFO, "%s", status.toString().c_str());
+            }
+
             return status.isOk();
         }
         catch (const std::exception &ex)
         {
-            LOG_F(ERROR, "Redis find error: %s", ex.what());
+            auto status = domain::Status::error(domain::Status::Code::RedisError, ex.what())
+                              .withOperation("find")
+                              .withKey(key);
+            LOG_F(ERROR, "%s", status.toString().c_str());
             return false;
         }
     }
@@ -136,25 +194,46 @@ namespace finance::infrastructure::storage
                 auto status = connect();
                 if (!status.isOk())
                 {
+                    LOG_F(ERROR, "%s", status.toString().c_str());
                     return false;
                 }
             }
 
             redisReply *reply = (redisReply *)redisCommand(redisContext_, "DEL %s", key.c_str());
-            if (!reply)
+            std::string response = reply ? reply->str : "";
+
+            domain::Status status = reply && reply->type != REDIS_REPLY_ERROR
+                                        ? domain::Status::ok()
+                                              .withOperation("remove")
+                                              .withKey(key)
+                                              .withResponse(response)
+                                        : domain::Status::error(domain::Status::Code::RedisError, reply ? reply->str : "no reply")
+                                              .withOperation("remove")
+                                              .withKey(key)
+                                              .withResponse(response);
+
+            if (reply)
+                freeReplyObject(reply);
+
+            if (!status.isOk())
             {
-                return false;
+                LOG_F(ERROR, "%s", status.toString().c_str());
+            }
+            else
+            {
+                LOG_F(INFO, "%s", status.toString().c_str());
             }
 
-            freeReplyObject(reply);
-
-            // 從 cache 刪除
+            // Remove from cache
             summaryCache_.erase(key);
-            return true;
+            return status.isOk();
         }
         catch (const std::exception &ex)
         {
-            LOG_F(ERROR, "Redis remove error: %s", ex.what());
+            auto status = domain::Status::error(domain::Status::Code::RedisError, ex.what())
+                              .withOperation("remove")
+                              .withKey(key);
+            LOG_F(ERROR, "%s", status.toString().c_str());
             return false;
         }
     }
@@ -168,32 +247,53 @@ namespace finance::infrastructure::storage
         try
         {
             redisReply *reply = (redisReply *)redisCommand(redisContext_, "KEYS summary:*");
+            std::string response = reply ? reply->str : "";
+
+            domain::Status status;
             if (!reply || reply->type != REDIS_REPLY_ARRAY)
             {
-                if (reply)
-                    freeReplyObject(reply);
-                return result;
+                status = domain::Status::error(domain::Status::Code::RedisError, "Invalid reply type")
+                             .withOperation("loadAll")
+                             .withResponse(response);
             }
-
-            // Clear existing cache before loading new data
-            summaryCache_.clear();
-
-            for (size_t i = 0; i < reply->elements; i++)
+            else
             {
-                std::string key = reply->element[i]->str;
-                domain::SummaryData data;
-                if (find(key, data))
+                // Clear existing cache before loading new data
+                summaryCache_.clear();
+
+                for (size_t i = 0; i < reply->elements; i++)
                 {
-                    result.push_back(data);
-                    // Initialize cache with loaded data
-                    summaryCache_[key] = data;
+                    std::string key = reply->element[i]->str;
+                    domain::SummaryData data;
+                    if (find(key, data))
+                    {
+                        result.push_back(data);
+                        // Initialize cache with loaded data
+                        summaryCache_[key] = data;
+                    }
                 }
+                status = domain::Status::ok()
+                             .withOperation("loadAll")
+                             .withResponse(response);
             }
-            freeReplyObject(reply);
+
+            if (reply)
+                freeReplyObject(reply);
+
+            if (!status.isOk())
+            {
+                LOG_F(ERROR, "%s", status.toString().c_str());
+            }
+            else
+            {
+                LOG_F(INFO, "%s", status.toString().c_str());
+            }
         }
         catch (const std::exception &ex)
         {
-            LOG_F(ERROR, "Redis loadAll error: %s", ex.what());
+            auto status = domain::Status::error(domain::Status::Code::RedisError, ex.what())
+                              .withOperation("loadAll");
+            LOG_F(ERROR, "%s", status.toString().c_str());
         }
         return result;
     }
@@ -218,6 +318,7 @@ namespace finance::infrastructure::storage
                 auto status = connect();
                 if (!status.isOk())
                 {
+                    LOG_F(ERROR, "%s", status.toString().c_str());
                     return false;
                 }
             }
@@ -226,7 +327,10 @@ namespace finance::infrastructure::storage
             auto summaries = getAllBySecondaryKey(stock_id);
             if (summaries.empty())
             {
-                LOG_F(WARNING, "No summaries found for stock: %s", stock_id.c_str());
+                auto status = domain::Status::error(domain::Status::Code::NotFound, "No summaries found")
+                                  .withOperation("updateCompanySummary")
+                                  .withKey(stock_id);
+                LOG_F(WARNING, "%s", status.toString().c_str());
                 return false;
             }
 
@@ -258,20 +362,42 @@ namespace finance::infrastructure::storage
             std::string json = serializeSummaryData(aggregated);
 
             redisReply *reply = (redisReply *)redisCommand(redisContext_, "SET %s %s", key.c_str(), json.c_str());
-            if (!reply)
-            {
-                return false;
-            }
+            std::string response = reply ? reply->str : "";
 
-            freeReplyObject(reply);
+            domain::Status status = reply && reply->type != REDIS_REPLY_ERROR
+                                        ? domain::Status::ok()
+                                              .withOperation("updateCompanySummary")
+                                              .withKey(key)
+                                              .withRequest(json)
+                                              .withResponse(response)
+                                        : domain::Status::error(domain::Status::Code::RedisError, reply ? reply->str : "no reply")
+                                              .withOperation("updateCompanySummary")
+                                              .withKey(key)
+                                              .withRequest(json)
+                                              .withResponse(response);
+
+            if (reply)
+                freeReplyObject(reply);
+
+            if (!status.isOk())
+            {
+                LOG_F(ERROR, "%s", status.toString().c_str());
+            }
+            else
+            {
+                LOG_F(INFO, "%s", status.toString().c_str());
+            }
 
             // Update cache
             summaryCache_[key] = aggregated;
-            return true;
+            return status.isOk();
         }
         catch (const std::exception &ex)
         {
-            LOG_F(ERROR, "Redis update company summary error: %s", ex.what());
+            auto status = domain::Status::error(domain::Status::Code::RedisError, ex.what())
+                              .withOperation("updateCompanySummary")
+                              .withKey(stock_id);
+            LOG_F(ERROR, "%s", status.toString().c_str());
             return false;
         }
     }
@@ -309,11 +435,15 @@ namespace finance::infrastructure::storage
             data.afterShortAvailableAmount = j["after_short_available_amount"].get<double>();
             data.afterShortAvailableQty = j["after_short_available_qty"].get<int64_t>();
             data.belongBranches = j["belong_branches"].get<std::vector<std::string>>();
-            return domain::Status::ok();
+            return domain::Status::ok()
+                .withOperation("deserializeSummaryData")
+                .withRequest(json);
         }
         catch (const std::exception &ex)
         {
-            return domain::Status::error(domain::Status::Code::DESERIALIZATION_ERROR, ex.what());
+            return domain::Status::error(domain::Status::Code::DeserializationError, ex.what())
+                .withOperation("deserializeSummaryData")
+                .withRequest(json);
         }
     }
 
@@ -326,27 +456,51 @@ namespace finance::infrastructure::storage
         try
         {
             redisReply *reply = (redisReply *)redisCommand(redisContext_, "KEYS summary:*");
+            std::string response = reply ? reply->str : "";
+
+            domain::Status status;
             if (!reply || reply->type != REDIS_REPLY_ARRAY)
             {
-                if (reply)
-                    freeReplyObject(reply);
-                return result;
+                status = domain::Status::error(domain::Status::Code::RedisError, "Invalid reply type")
+                             .withOperation("getAllBySecondaryKey")
+                             .withKey(secondaryKey)
+                             .withResponse(response);
+            }
+            else
+            {
+                for (size_t i = 0; i < reply->elements; i++)
+                {
+                    std::string key = reply->element[i]->str;
+                    domain::SummaryData data;
+                    if (find(key, data) && data.areaCenter == secondaryKey)
+                    {
+                        result.push_back(data);
+                    }
+                }
+                status = domain::Status::ok()
+                             .withOperation("getAllBySecondaryKey")
+                             .withKey(secondaryKey)
+                             .withResponse(response);
             }
 
-            for (size_t i = 0; i < reply->elements; i++)
+            if (reply)
+                freeReplyObject(reply);
+
+            if (!status.isOk())
             {
-                std::string key = reply->element[i]->str;
-                domain::SummaryData data;
-                if (find(key, data) && data.areaCenter == secondaryKey)
-                {
-                    result.push_back(data);
-                }
+                LOG_F(ERROR, "%s", status.toString().c_str());
             }
-            freeReplyObject(reply);
+            else
+            {
+                LOG_F(INFO, "%s", status.toString().c_str());
+            }
         }
         catch (const std::exception &ex)
         {
-            LOG_F(ERROR, "Redis getAllBySecondaryKey error: %s", ex.what());
+            auto status = domain::Status::error(domain::Status::Code::RedisError, ex.what())
+                              .withOperation("getAllBySecondaryKey")
+                              .withKey(secondaryKey);
+            LOG_F(ERROR, "%s", status.toString().c_str());
         }
         return result;
     }
@@ -364,32 +518,53 @@ namespace finance::infrastructure::storage
                                                            "$.area_center AS area_center TEXT "
                                                            "$.belong_branches.* AS branches TAG");
 
-            bool success = (reply != nullptr && reply->type != REDIS_REPLY_ERROR);
+            std::string response = reply ? reply->str : "";
+
+            domain::Status status = reply && reply->type != REDIS_REPLY_ERROR
+                                        ? domain::Status::ok()
+                                              .withOperation("createIndex")
+                                              .withResponse(response)
+                                        : domain::Status::error(domain::Status::Code::RedisError, reply ? reply->str : "no reply")
+                                              .withOperation("createIndex")
+                                              .withResponse(response);
+
             if (reply)
                 freeReplyObject(reply);
-            return success;
+
+            if (!status.isOk())
+            {
+                LOG_F(ERROR, "%s", status.toString().c_str());
+            }
+            else
+            {
+                LOG_F(INFO, "%s", status.toString().c_str());
+            }
+
+            return status.isOk();
         }
         catch (const std::exception &ex)
         {
-            LOG_F(ERROR, "Redis createIndex error: %s", ex.what());
+            auto status = domain::Status::error(domain::Status::Code::RedisError, ex.what())
+                              .withOperation("createIndex");
+            LOG_F(ERROR, "%s", status.toString().c_str());
             return false;
         }
     }
 
     domain::SummaryData *RedisSummaryAdapter::get(const std::string &key)
     {
-        // 先查 cache
+        // Check cache first
         auto it = summaryCache_.find(key);
         if (it != summaryCache_.end())
         {
             return new domain::SummaryData(it->second);
         }
 
-        // cache 沒有，去 Redis 查
+        // Not in cache, check Redis
         auto data = std::make_unique<domain::SummaryData>();
         if (find(key, *data))
         {
-            // 更新 cache
+            // Update cache
             summaryCache_[key] = *data;
             return data.release();
         }
