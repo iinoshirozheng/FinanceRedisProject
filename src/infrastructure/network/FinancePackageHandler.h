@@ -19,7 +19,7 @@ namespace finance::infrastructure::network
             std::shared_ptr<config::AreaBranchProvider> areaBranchProvider)
             : repository_(repository), areaBranchProvider_(areaBranchProvider) {}
 
-        bool processData(domain::ApData &ap_data) override;
+        bool processData(const domain::ApData &ap_data) override;
 
     private:
         std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository_;
@@ -35,7 +35,7 @@ namespace finance::infrastructure::network
             std::shared_ptr<config::AreaBranchProvider> areaBranchProvider)
             : repository_(repository), areaBranchProvider_(areaBranchProvider) {}
 
-        bool processData(domain::ApData &ap_data) override;
+        bool processData(const domain::ApData &ap_data) override;
 
     private:
         std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository_;
@@ -52,7 +52,7 @@ namespace finance::infrastructure::network
         PacketProcessorFactory(const PacketProcessorFactory &) = delete;
         PacketProcessorFactory &operator=(const PacketProcessorFactory &) = delete;
 
-        bool processData(domain::ApData &ap_data) override;
+        bool processData(const domain::ApData &ap_data) override;
 
     private:
         domain::IPackageHandler *getProcessorHandler(const std::string_view &tcode);

@@ -1,5 +1,5 @@
 #include "FinanceService.h"
-#include "../common/FinanceUtils.hpp"
+#include "utils/FinanceUtils.hpp"
 #include "../infrastructure/network/FinancePackageHandler.h"
 #include "../infrastructure/network/TcpServiceAdapter.h"
 #include "../infrastructure/config/ConnectionConfigProvider.hpp"

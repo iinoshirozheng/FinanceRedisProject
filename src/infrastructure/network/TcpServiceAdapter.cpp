@@ -9,7 +9,9 @@ namespace finance::infrastructure::network
     using namespace std::chrono_literals;
 
     TcpServiceAdapter::TcpServiceAdapter(int port, std::shared_ptr<domain::IPackageHandler> handler)
-        : serverSocket_(Poco::Net::SocketAddress("0.0.0.0", port)), handler_(std::move(handler))
+        : serverSocket_(Poco::Net::SocketAddress("0.0.0.0", port)),
+          handler_(std::move(handler)),
+          ringBuffer_(std::make_shared<RingBuffer>(RING_BUFFER_SIZE))
     {
         serverSocket_.setReuseAddress(true);
         serverSocket_.setReusePort(true);
@@ -27,10 +29,7 @@ namespace finance::infrastructure::network
 
         running_ = true;
         acceptThread_ = std::thread(&TcpServiceAdapter::acceptLoop, this);
-        packetQueue_.startProcessing([this](const std::vector<char> &data)
-                                     {
-            auto fb = reinterpret_cast<domain::FinancePackageMessage*>(const_cast<char*>(data.data()));
-            handler_->processData(fb->ap_data); });
+        processingThread_ = std::thread(&TcpServiceAdapter::processPackets, this);
         return true;
     }
 
@@ -41,11 +40,33 @@ namespace finance::infrastructure::network
 
         running_ = false;
         serverSocket_.close();
-        packetQueue_.stopProcessing();
 
         if (acceptThread_.joinable())
         {
             acceptThread_.join();
+        }
+        if (processingThread_.joinable())
+        {
+            processingThread_.join();
+        }
+    }
+
+    void TcpServiceAdapter::processPackets()
+    {
+        PacketRef ref;
+        while (running_)
+        {
+            if (ringBuffer_->findPacket(ref))
+            {
+                auto fb = reinterpret_cast<const domain::FinancePackageMessage *>(
+                    ringBuffer_->data() + ref.offset);
+                handler_->processData(fb->ap_data);
+                ringBuffer_->consume(ref.length);
+            }
+            else
+            {
+                std::this_thread::sleep_for(1ms);
+            }
         }
     }
 
@@ -88,86 +109,29 @@ namespace finance::infrastructure::network
         }
     }
 
-    bool TcpServiceAdapter::parseMessage(std::string_view buffer, domain::FinancePackageMessage &message)
-    {
-        if (buffer.empty())
-            return false;
-
-        if (buffer.size() < sizeof(domain::FinancePackageMessage))
-            return false;
-
-        std::memcpy(&message, buffer.data(), sizeof(domain::FinancePackageMessage));
-        return true;
-    }
-
     void TcpServiceAdapter::handleClient(Poco::Net::StreamSocket socket)
     {
         try
         {
-            Poco::Buffer<char> buffer(MAX_BUFFER_SIZE);
-            buffer.resize(0);
-            int searchedIndex = 0;
-
             while (running_)
             {
-                // Receive data from socket
-                int n = socket.receiveBytes(buffer.begin(), static_cast<int>(buffer.capacity()));
+                size_t maxLen;
+                char *writePtr = ringBuffer_->writablePtr(&maxLen);
+                if (maxLen == 0)
+                {
+                    LOG_F(WARNING, "Ring buffer full, waiting...");
+                    std::this_thread::sleep_for(std::chrono::milliseconds(RECEIVE_RETRY_MS));
+                    continue;
+                }
+
+                int n = socket.receiveBytes(writePtr, static_cast<int>(maxLen));
                 if (n <= 0)
                 {
                     LOG_F(INFO, "Client disconnected");
                     break;
                 }
 
-                // Resize buffer to actual received size
-                buffer.resize(n);
-                LOG_F(INFO, "Received {} bytes from client", n);
-
-                // Process received data
-                auto bufferBegin = buffer.begin();
-                auto bufferEnd = buffer.end();
-                auto newlinePos = std::find(bufferBegin + searchedIndex, bufferEnd, '\n');
-
-                if (newlinePos == bufferEnd)
-                {
-                    // No complete packet found, save position for next search
-                    searchedIndex = buffer.size();
-                    LOG_F(INFO, "No complete packet found, waiting for more data");
-                    continue;
-                }
-
-                size_t packetLength = newlinePos - bufferBegin;
-
-                if (packetLength == 2)
-                {
-                    // Keep-alive packet
-                    LOG_F(INFO, "Received keep-alive packet");
-                    std::copy(newlinePos + 1, bufferEnd, bufferBegin);
-                    buffer.resize(buffer.size() - packetLength - 1);
-                    searchedIndex = 0;
-                    continue;
-                }
-
-                if (packetLength > MAX_PACKET_SIZE)
-                {
-                    LOG_F(ERROR, "Packet too large: {} bytes (max: {})", packetLength, MAX_PACKET_SIZE);
-                    break;
-                }
-
-                // Extract complete packet
-                std::vector<char> data(bufferBegin, newlinePos);
-                LOG_F(INFO, "Extracted packet of size {}", data.size());
-
-                // Move remaining data to start of buffer
-                std::copy(newlinePos + 1, bufferEnd, bufferBegin);
-                buffer.resize(buffer.size() - packetLength - 1);
-                searchedIndex = 0;
-
-                // Add packet to queue
-                if (!packetQueue_.enqueue(std::move(data)))
-                {
-                    LOG_F(WARNING, "Packet queue is full, dropping packet");
-                    std::this_thread::sleep_for(std::chrono::milliseconds(RECEIVE_RETRY_MS));
-                }
+                ringBuffer_->advanceWrite(n);
             }
         }
         catch (const Poco::TimeoutException &)
@@ -180,7 +144,7 @@ namespace finance::infrastructure::network
         }
         catch (const std::exception &ex)
         {
-            LOG_F(ERROR, "Error handling client: {}", ex.what());
+            LOG_F(ERROR, "Error handling client: %s", ex.what());
         }
     }
 } // namespace finance::infrastructure::network

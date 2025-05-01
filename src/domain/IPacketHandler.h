@@ -14,7 +14,7 @@ namespace finance::domain
         // @param data 要處理的數據（模板類型 T）
         // @param optionalHeader 可選的頭部信息
         // @return 如果處理成功則返回 true
-        virtual bool processData(struct domain::ApData &data) = 0;
+        virtual bool processData(const struct domain::ApData &data) = 0;
     };
 
 } // namespace finance::domain

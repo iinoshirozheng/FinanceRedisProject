@@ -30,7 +30,7 @@ namespace finance::infrastructure::storage
         bool update(const std::string &key, const domain::SummaryData &data) override;
         std::vector<domain::SummaryData> getAllBySecondaryKey(const std::string &secondaryKey) override;
         bool createIndex() override;
-        bool updateCompanySummary(const std::string &stock_id);
+        bool updateCompanySummary(const std::string &stock_id) override;
 
     private:
         static constexpr const char *KEY_PREFIX = "summary:";

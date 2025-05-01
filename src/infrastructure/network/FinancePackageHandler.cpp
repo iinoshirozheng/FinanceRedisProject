@@ -1,10 +1,11 @@
 #include "FinancePackageHandler.h"
-#include "../../common/FinanceUtils.hpp"
+#include <Poco/Net/TCPServer.h>
+#include "../../utils/FinanceUtils.hpp"
 #include <loguru.hpp>
 
 namespace finance::infrastructure::network
 {
-    bool Hcrtm01Handler::processData(domain::ApData &ap_data)
+    bool Hcrtm01Handler::processData(const domain::ApData &ap_data)
     {
         const domain::MessageDataHCRTM01 &hcrtm01 = ap_data.data.hcrtm01;
         if (common::STR_VIEW(hcrtm01.area_center) == common::STR_VIEW(ap_data.system))
@@ -23,7 +24,6 @@ namespace finance::infrastructure::network
             int64_t short_after_hour_sell_order_amount = common::FinanceUtils::backOfficeToInt(hcrtm01.short_after_hour_sell_order_amount, sizeof(hcrtm01.short_after_hour_sell_order_amount));
             int64_t short_after_hour_sell_order_qty = common::FinanceUtils::backOfficeToInt(hcrtm01.short_after_hour_sell_order_qty, sizeof(hcrtm01.short_after_hour_sell_order_qty));
             int64_t short_sell_match_amount = common::FinanceUtils::backOfficeToInt(hcrtm01.short_sell_match_amount, sizeof(hcrtm01.short_sell_match_amount));
-            int64_t short_sell_match_qty = common::FinanceUtils::backOfficeToInt(hcrtm01.short_sell_match_qty, sizeof(hcrtm01.short_sell_match_qty));
             int64_t margin_after_hour_buy_order_amount = common::FinanceUtils::backOfficeToInt(hcrtm01.margin_after_hour_buy_order_amount, sizeof(hcrtm01.margin_after_hour_buy_order_amount));
             int64_t margin_after_hour_buy_order_qty = common::FinanceUtils::backOfficeToInt(hcrtm01.margin_after_hour_buy_order_qty, sizeof(hcrtm01.margin_after_hour_buy_order_qty));
             int64_t margin_buy_match_amount = common::FinanceUtils::backOfficeToInt(hcrtm01.margin_buy_match_amount, sizeof(hcrtm01.margin_buy_match_amount));
@@ -77,7 +77,7 @@ namespace finance::infrastructure::network
         return false;
     }
 
-    bool Hcrtm05pHandler::processData(domain::ApData &ap_data)
+    bool Hcrtm05pHandler::processData(const domain::ApData &ap_data)
     {
         const domain::MessageDataHCRTM05P &hcrtm05p = ap_data.data.hcrtm05p;
 
@@ -125,7 +125,7 @@ namespace finance::infrastructure::network
         handlers_["ELD002"] = std::make_unique<Hcrtm05pHandler>(repository_, areaBranchProvider_);
     }
 
-    bool PacketProcessorFactory::processData(domain::ApData &ap_data)
+    bool PacketProcessorFactory::processData(const domain::ApData &ap_data)
     {
         if (ap_data.entry_type[0] != 'A' && ap_data.entry_type[0] != 'C')
         {
@@ -134,8 +134,8 @@ namespace finance::infrastructure::network
         }
 
         // Get the parent FinancePackageMessage
-        auto parent = reinterpret_cast<domain::FinancePackageMessage *>(
-            reinterpret_cast<char *>(&ap_data) - offsetof(domain::FinancePackageMessage, ap_data));
+        auto parent = reinterpret_cast<const domain::FinancePackageMessage *>(
+            reinterpret_cast<const char *>(&ap_data) - offsetof(domain::FinancePackageMessage, ap_data));
 
         auto handler = getProcessorHandler(std::string_view(parent->t_code, sizeof(parent->t_code)));
         if (!handler)

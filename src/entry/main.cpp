@@ -13,7 +13,7 @@ int main(int argc, char *argv[])
 {
     try
     {
-        // Initialize logging
+        // Initialize logging with async mode
         loguru::init(argc, argv);
         loguru::add_file("finance.log", loguru::Append, loguru::Verbosity_MAX);
         LOG_F(INFO, "Starting Finance Service...");
@@ -54,26 +54,15 @@ int main(int argc, char *argv[])
         }
 
         // Run service
-        status = service.run();
-        if (!status.isOk())
-        {
-            LOG_F(ERROR, "Service error: %s", status.message().c_str());
-            return 1;
-        }
+        service.run();
 
-        // Graceful shutdown
-        service.shutdown();
-        LOG_F(INFO, "Service shutdown complete");
+        // Cleanup
+        loguru::flush(); // 确保所有日志都被写入
         return 0;
     }
-    catch (const std::exception &ex)
+    catch (const std::exception &e)
     {
-        LOG_F(ERROR, "Unhandled exception: %s", ex.what());
-        return 1;
-    }
-    catch (...)
-    {
-        LOG_F(ERROR, "Unknown error occurred");
+        LOG_F(FATAL, "Unhandled exception: %s", e.what());
         return 1;
     }
 }

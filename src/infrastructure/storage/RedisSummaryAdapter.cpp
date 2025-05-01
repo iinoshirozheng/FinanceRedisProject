@@ -1,5 +1,5 @@
 #include "RedisSummaryAdapter.h"
-#include "../../common/FinanceUtils.hpp"
+#include "../../utils/FinanceUtils.hpp"
 #include <loguru.hpp>
 #include <nlohmann/json.hpp>
 #include <hiredis/hiredis.h>
