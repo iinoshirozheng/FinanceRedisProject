@@ -30,7 +30,7 @@ namespace finance::application
             if (!configProvider->loadFromFile(configPath))
             {
                 return domain::Status::error(
-                    domain::Status::Code::ERROR,
+                    domain::Status::Code::InitializationError,
                     "Failed to load configuration file: " + configPath);
             }
 
@@ -38,7 +38,7 @@ namespace finance::application
             if (!areaBranchProvider_->loadFromFile("area_branch.json"))
             {
                 return domain::Status::error(
-                    domain::Status::Code::ERROR,
+                    domain::Status::Code::InitializationError,
                     "Failed to load area-branch mapping");
             }
 
@@ -71,7 +71,7 @@ namespace finance::application
         catch (const std::exception &ex)
         {
             return domain::Status::error(
-                domain::Status::Code::INITIALIZATION_ERROR,
+                domain::Status::Code::InitializationError,
                 std::string("Initialization failed: ") + ex.what());
         }
     }
@@ -83,7 +83,7 @@ namespace finance::application
             if (!tcpService_->start())
             {
                 return domain::Status::error(
-                    domain::Status::Code::RUNTIME_ERROR,
+                    domain::Status::Code::RuntimeError,
                     "Failed to start TCP service");
             }
 
@@ -108,7 +108,7 @@ namespace finance::application
         catch (const std::exception &ex)
         {
             return domain::Status::error(
-                domain::Status::Code::RUNTIME_ERROR,
+                domain::Status::Code::RuntimeError,
                 std::string("Runtime error: ") + ex.what());
         }
     }
