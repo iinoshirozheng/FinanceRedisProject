@@ -5,138 +5,130 @@
 #include <set>
 #include "./JsonProviderBase.hpp"
 
-namespace finance
+namespace finance::infrastructure::config
 {
-    namespace infrastructure
+    /**
+     * AreaBranchProvider 的實現，從 JSON 文件加載配置
+     */
+    class AreaBranchProvider : public JsonProviderBase
     {
-        namespace config
+    public:
+        AreaBranchProvider() = default;
+        explicit AreaBranchProvider(const std::string &redisUrl) : redisUrl_(redisUrl) {}
+        ~AreaBranchProvider() override = default;
+
+        inline virtual bool loadFromFile(const std::string &filePath) override
         {
-            /**
-             * AreaBranchProvider 的實現，從 JSON 文件加載配置
-             */
-            class AreaBranchProvider : public JsonProviderBase
+            if (!JsonProviderBase::loadFromFile(filePath))
             {
-            public:
-                AreaBranchProvider() = default;
-                explicit AreaBranchProvider(const std::string &redisUrl) : redisUrl_(redisUrl) {}
-                ~AreaBranchProvider() override = default;
+                // TODO: LOG()
+                return false;
+            }
 
-                inline virtual bool loadFromFile(const std::string &filePath) override
+            for (auto &[key, value] : JsonProviderBase::getJsonData().items())
+            {
+                // std::cout << "key:" << key << "value:" << value << std::endl;
+                backoffice_ids_.insert(key);
+                for (auto &branch : value)
                 {
-                    if (!JsonProviderBase::loadFromFile(filePath))
-                    {
-                        // TODO: LOG()
-                        return false;
-                    }
-
-                    for (auto &[key, value] : JsonProviderBase::getJsonData().items())
-                    {
-                        // std::cout << "key:" << key << "value:" << value << std::endl;
-                        backoffice_ids_.insert(key);
-                        for (auto &branch : value)
-                        {
-                            auto branch_id = branch.get<std::string>();
-                            followingBrokerIds_.emplace(branch_id, key);
-                            allBranchs_.emplace_back(branch_id);
-                        }
-                    }
-                    return true;
+                    auto branch_id = branch.get<std::string>();
+                    followingBrokerIds_.emplace(branch_id, key);
+                    allBranchs_.emplace_back(branch_id);
                 }
+            }
+            return true;
+        }
 
-                std::string getAreaCenterByBranchId(const std::string &branchId) const
+        std::string getAreaCenterByBranchId(const std::string &branchId) const
+        {
+            if (isJsonDataEmpty())
+            {
+                LOG_F(ERROR, "JSON data is empty");
+                return "";
+            }
+
+            try
+            {
+                return jsonData_["area_centers"][branchId].get<std::string>();
+            }
+            catch (const nlohmann::json::exception &e)
+            {
+                LOG_F(ERROR, "Failed to get area center for branch %s: %s", branchId.c_str(), e.what());
+                return "";
+            }
+        }
+
+        std::vector<std::string> getAllBranches() const
+        {
+            if (isJsonDataEmpty())
+            {
+                LOG_F(ERROR, "JSON data is empty");
+                return {};
+            }
+
+            try
+            {
+                std::vector<std::string> branches;
+                for (const auto &[branchId, _] : jsonData_["area_centers"].items())
                 {
-                    if (isJsonDataEmpty())
-                    {
-                        LOG_F(ERROR, "JSON data is empty");
-                        return "";
-                    }
-
-                    try
-                    {
-                        return jsonData_["area_centers"][branchId].get<std::string>();
-                    }
-                    catch (const nlohmann::json::exception &e)
-                    {
-                        LOG_F(ERROR, "Failed to get area center for branch %s: %s", branchId.c_str(), e.what());
-                        return "";
-                    }
+                    branches.push_back(branchId);
                 }
+                return branches;
+            }
+            catch (const nlohmann::json::exception &e)
+            {
+                LOG_F(ERROR, "Failed to get all branches: %s", e.what());
+                return {};
+            }
+        }
 
-                std::vector<std::string> getAllBranches() const
+        std::set<std::string> getAllBackofficeIds() const
+        {
+            if (isJsonDataEmpty())
+            {
+                LOG_F(ERROR, "JSON data is empty");
+                return {};
+            }
+
+            try
+            {
+                return jsonData_["backoffice_ids"].get<std::set<std::string>>();
+            }
+            catch (const nlohmann::json::exception &e)
+            {
+                LOG_F(ERROR, "Failed to get backoffice IDs: %s", e.what());
+                return {};
+            }
+        }
+
+        std::vector<std::string> getBranchesForArea(const std::string &areaCenter) const
+        {
+            if (isJsonDataEmpty())
+            {
+                LOG_F(ERROR, "JSON data is empty");
+                return {};
+            }
+
+            try
+            {
+                if (auto it = jsonData_.find(areaCenter); it != jsonData_.end())
                 {
-                    if (isJsonDataEmpty())
-                    {
-                        LOG_F(ERROR, "JSON data is empty");
-                        return {};
-                    }
-
-                    try
-                    {
-                        std::vector<std::string> branches;
-                        for (const auto &[branchId, _] : jsonData_["area_centers"].items())
-                        {
-                            branches.push_back(branchId);
-                        }
-                        return branches;
-                    }
-                    catch (const nlohmann::json::exception &e)
-                    {
-                        LOG_F(ERROR, "Failed to get all branches: %s", e.what());
-                        return {};
-                    }
+                    return it->get<std::vector<std::string>>();
                 }
+                return {};
+            }
+            catch (const nlohmann::json::exception &e)
+            {
+                LOG_F(ERROR, "Failed to get branches for area %s: %s", areaCenter.c_str(), e.what());
+                return {};
+            }
+        }
 
-                std::set<std::string> getAllBackofficeIds() const
-                {
-                    if (isJsonDataEmpty())
-                    {
-                        LOG_F(ERROR, "JSON data is empty");
-                        return {};
-                    }
+    private:
+        std::map<std::string, std::string> followingBrokerIds_;
+        std::vector<std::string> allBranchs_;
+        std::set<std::string> backoffice_ids_;
+        std::string redisUrl_;
+    };
 
-                    try
-                    {
-                        return jsonData_["backoffice_ids"].get<std::set<std::string>>();
-                    }
-                    catch (const nlohmann::json::exception &e)
-                    {
-                        LOG_F(ERROR, "Failed to get backoffice IDs: %s", e.what());
-                        return {};
-                    }
-                }
-
-                std::vector<std::string> getBranchesForArea(const std::string &areaCenter) const
-                {
-                    if (isJsonDataEmpty())
-                    {
-                        LOG_F(ERROR, "JSON data is empty");
-                        return {};
-                    }
-
-                    try
-                    {
-                        if (auto it = jsonData_.find(areaCenter); it != jsonData_.end())
-                        {
-                            return it->get<std::vector<std::string>>();
-                        }
-                        return {};
-                    }
-                    catch (const nlohmann::json::exception &e)
-                    {
-                        LOG_F(ERROR, "Failed to get branches for area %s: %s", areaCenter.c_str(), e.what());
-                        return {};
-                    }
-                }
-
-            private:
-                std::map<std::string, std::string> followingBrokerIds_;
-                std::vector<std::string> allBranchs_;
-                std::set<std::string> backoffice_ids_;
-                std::string redisUrl_;
-            };
-
-        } // namespace config
-
-    } // namespace infrastructure
-
-} // namespace finance
+} // namespace finance::infrastructure::config

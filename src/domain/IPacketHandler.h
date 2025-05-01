@@ -2,22 +2,19 @@
 
 #include "./FinanceDataStructure.h"
 
-namespace finance
+namespace finance::domain
 {
-    namespace domain
+    // 通用數據處理器介面，基於模板的方式
+    class IPackageHandler
     {
-        // 通用數據處理器介面，基於模板的方式
-        class IPackageHandler
-        {
-        public:
-            virtual ~IPackageHandler() = default;
+    public:
+        virtual ~IPackageHandler() = default;
 
-            // 處理數據
-            // @param data 要處理的數據（模板類型 T）
-            // @param optionalHeader 可選的頭部信息
-            // @return 如果處理成功則返回 true
-            virtual bool processData(struct domain::ApData &data) = 0;
-        };
+        // 處理數據
+        // @param data 要處理的數據（模板類型 T）
+        // @param optionalHeader 可選的頭部信息
+        // @return 如果處理成功則返回 true
+        virtual bool processData(struct domain::ApData &data) = 0;
+    };
 
-    } // namespace domain
-} // namespace finance
+} // namespace finance::domain

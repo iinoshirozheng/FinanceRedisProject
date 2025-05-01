@@ -8,66 +8,58 @@
 #include <iostream>
 #include <string_view>
 
-namespace finance
+namespace finance::infrastructure::network
 {
-    namespace infrastructure
+    // HCRTM01 封包的處理器
+    class Hcrtm01Handler : public domain::IPackageHandler
     {
-        namespace network
-        {
-            // HCRTM01 封包的處理器
-            class Hcrtm01Handler : public domain::IPackageHandler
-            {
-            public:
-                explicit Hcrtm01Handler(
-                    std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository,
-                    std::shared_ptr<config::AreaBranchProvider> areaBranchProvider)
-                    : repository_(repository), areaBranchProvider_(areaBranchProvider) {}
+    public:
+        explicit Hcrtm01Handler(
+            std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository,
+            std::shared_ptr<config::AreaBranchProvider> areaBranchProvider)
+            : repository_(repository), areaBranchProvider_(areaBranchProvider) {}
 
-                bool processData(domain::ApData &ap_data) override;
+        bool processData(domain::ApData &ap_data) override;
 
-            private:
-                std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository_;
-                std::shared_ptr<config::AreaBranchProvider> areaBranchProvider_;
-            };
+    private:
+        std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository_;
+        std::shared_ptr<config::AreaBranchProvider> areaBranchProvider_;
+    };
 
-            // HCRTM05P 封包的處理器
-            class Hcrtm05pHandler : public domain::IPackageHandler
-            {
-            public:
-                explicit Hcrtm05pHandler(
-                    std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository,
-                    std::shared_ptr<config::AreaBranchProvider> areaBranchProvider)
-                    : repository_(repository), areaBranchProvider_(areaBranchProvider) {}
+    // HCRTM05P 封包的處理器
+    class Hcrtm05pHandler : public domain::IPackageHandler
+    {
+    public:
+        explicit Hcrtm05pHandler(
+            std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository,
+            std::shared_ptr<config::AreaBranchProvider> areaBranchProvider)
+            : repository_(repository), areaBranchProvider_(areaBranchProvider) {}
 
-                bool processData(domain::ApData &ap_data) override;
+        bool processData(domain::ApData &ap_data) override;
 
-            private:
-                std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository_;
-                std::shared_ptr<config::AreaBranchProvider> areaBranchProvider_;
-            };
+    private:
+        std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository_;
+        std::shared_ptr<config::AreaBranchProvider> areaBranchProvider_;
+    };
 
-            class PacketProcessorFactory : public domain::IPackageHandler
-            {
-            public:
-                PacketProcessorFactory(
-                    std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository,
-                    std::shared_ptr<config::AreaBranchProvider> areaBranchProvider);
+    class PacketProcessorFactory : public domain::IPackageHandler
+    {
+    public:
+        PacketProcessorFactory(
+            std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository,
+            std::shared_ptr<config::AreaBranchProvider> areaBranchProvider);
 
-                PacketProcessorFactory(const PacketProcessorFactory &) = delete;
-                PacketProcessorFactory &operator=(const PacketProcessorFactory &) = delete;
+        PacketProcessorFactory(const PacketProcessorFactory &) = delete;
+        PacketProcessorFactory &operator=(const PacketProcessorFactory &) = delete;
 
-                bool processData(domain::ApData &ap_data) override;
+        bool processData(domain::ApData &ap_data) override;
 
-            private:
-                domain::IPackageHandler *getProcessorHandler(const std::string_view &tcode);
+    private:
+        domain::IPackageHandler *getProcessorHandler(const std::string_view &tcode);
 
-                std::unordered_map<std::string_view, std::unique_ptr<domain::IPackageHandler>> handlers_;
-                std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository_;
-                std::shared_ptr<config::AreaBranchProvider> areaBranchProvider_;
-            };
+        std::unordered_map<std::string_view, std::unique_ptr<domain::IPackageHandler>> handlers_;
+        std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository_;
+        std::shared_ptr<config::AreaBranchProvider> areaBranchProvider_;
+    };
 
-        } // namespace network
-
-    } // namespace infrastructure
-
-} // namespace finance
+} // namespace finance::infrastructure::network

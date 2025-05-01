@@ -9,276 +9,283 @@
 #define CHECK_MARX_NEW new
 #define MAX_BUFFER_SIZE 4096
 
-namespace finance
+namespace finance::infrastructure::network
 {
-    namespace infrastructure
+    using namespace std::chrono_literals;
+
+    // PacketDispatcher 實現
+    PacketDispatcher::PacketDispatcher(size_t maxBufferSize, std::shared_ptr<PacketQueue> packetQueue)
+        : buffer_(maxBufferSize), packetQueue_(packetQueue), running_(false)
     {
-        namespace network
+        buffer_.resize(0);
+    }
+
+    PacketDispatcher::~PacketDispatcher()
+    {
+        stopDispatching();
+    }
+
+    void PacketDispatcher::addData(const char *data, size_t size)
+    {
+        std::lock_guard<std::mutex> lock(bufferMutex_);
+        buffer_.append(data, size);
+    }
+
+    void PacketDispatcher::startDispatching()
+    {
+        if (running_)
         {
+            return;
+        }
 
-            using namespace std::chrono_literals;
+        running_ = true;
+        dispatchThread_ = std::thread(&PacketDispatcher::dispatchPackets, this);
+    }
 
-            // PacketDispatcher 實現
-            PacketDispatcher::PacketDispatcher(size_t maxBufferSize, std::shared_ptr<PacketQueue> packetQueue)
-                : buffer_(maxBufferSize), packetQueue_(packetQueue), running_(false)
+    void PacketDispatcher::stopDispatching()
+    {
+        if (!running_)
+        {
+            return;
+        }
+
+        running_ = false;
+
+        if (dispatchThread_.joinable())
+        {
+            dispatchThread_.join();
+        }
+    }
+
+    void PacketDispatcher::dispatchPackets()
+    {
+        int searchedIndex = 0;
+        std::vector<char> packetData;
+
+        while (running_)
+        {
+            // Scope for buffer lock
             {
-                buffer_.resize(0);
-            }
+                std::unique_lock<std::mutex> lock(bufferMutex_);
 
-            PacketDispatcher::~PacketDispatcher()
-            {
-                stopDispatching();
-            }
-
-            void PacketDispatcher::addData(const char *data, size_t size)
-            {
-                std::lock_guard<std::mutex> lock(bufferMutex_);
-                buffer_.append(data, size);
-            }
-
-            void PacketDispatcher::startDispatching()
-            {
-                if (running_)
+                if (buffer_.size() == 0)
                 {
-                    return;
+                    lock.unlock();
+                    std::this_thread::sleep_for(1ms);
+                    continue;
                 }
 
-                running_ = true;
-                dispatchThread_ = std::thread(&PacketDispatcher::dispatchPackets, this);
-            }
+                // Search for packet delimiter ('\n')
+                auto bufferBegin = buffer_.begin();
+                auto bufferEnd = buffer_.end();
+                auto newlinePos = std::find(bufferBegin + searchedIndex, bufferEnd, '\n');
 
-            void PacketDispatcher::stopDispatching()
-            {
-                if (!running_)
+                if (newlinePos == bufferEnd)
                 {
-                    return;
+                    searchedIndex = buffer_.size();
+                    lock.unlock();
+                    std::this_thread::sleep_for(1ms);
+                    continue;
                 }
 
-                running_ = false;
+                size_t packetLength = newlinePos - bufferBegin;
 
-                if (dispatchThread_.joinable())
+                if (packetLength == 2)
                 {
-                    dispatchThread_.join();
+                    // Special case: keep-alive packet
+                    LOG_F(INFO, "Received keep-alive packet");
+                    std::copy(newlinePos + 1, bufferEnd, bufferBegin);
+                    buffer_.resize(buffer_.size() - packetLength - 1);
+                    searchedIndex = 0;
+                    continue;
                 }
-            }
 
-            void PacketDispatcher::dispatchPackets()
+                // Reserve space for the packet
+                packetData.clear();
+                packetData.reserve(packetLength);
+
+                // Move data to packet vector
+                packetData.assign(bufferBegin, newlinePos);
+
+                // Remove processed data from buffer
+                std::copy(newlinePos + 1, bufferEnd, bufferBegin);
+                buffer_.resize(buffer_.size() - packetLength - 1);
+                searchedIndex = 0;
+            } // Buffer lock released here
+
+            // Process packet outside the lock
+            if (!packetData.empty())
             {
-                int searchedIndex = 0;
-                std::vector<char> tempBuffer;
+                packetQueue_->enqueue(std::move(packetData));
+            }
+        }
+    }
 
-                while (running_)
+    // FinanceServiceConnection 實現
+    FinanceServiceConnection::FinanceServiceConnection(
+        const Poco::Net::StreamSocket &socket,
+        std::shared_ptr<PacketDispatcher> dispatcher)
+        : Poco::Net::TCPServerConnection(socket), dispatcher_(dispatcher)
+    {
+    }
+
+    void FinanceServiceConnection::run()
+    {
+        try
+        {
+            Poco::Buffer<char> buffer(MAX_BUFFER_SIZE);
+
+            while (true)
+            {
+                int n = socket().receiveBytes(buffer.begin(), buffer.capacity());
+                if (n <= 0)
                 {
-                    size_t packetLength = 0;
-                    char *packetData = nullptr;
+                    break; // 客戶端斷開連接
+                }
 
-                    // Scope for buffer lock
+                dispatcher_->addData(buffer.begin(), n);
+            }
+        }
+        catch (const Poco::Exception &ex)
+        {
+            LOG_F(ERROR, "Connection error: %s", ex.displayText().c_str());
+        }
+        catch (const std::exception &ex)
+        {
+            LOG_F(ERROR, "Connection error: %s", ex.what());
+        }
+    }
+
+    // FinanceServiceConnectionFactory 實現
+    FinanceServiceConnectionFactory::FinanceServiceConnectionFactory(
+        std::shared_ptr<PacketDispatcher> dispatcher)
+        : dispatcher_(dispatcher)
+    {
+    }
+
+    Poco::Net::TCPServerConnection *FinanceServiceConnectionFactory::createConnection(
+        const Poco::Net::StreamSocket &socket)
+    {
+        return new FinanceServiceConnection(socket, dispatcher_);
+    }
+
+    // TcpServiceAdapter 實現
+    TcpServiceAdapter::TcpServiceAdapter(int port, std::shared_ptr<domain::IPackageHandler> handler)
+        : serverSocket_(Poco::Net::SocketAddress("0.0.0.0", port)), handler_(std::move(handler)), messageQueue_(MAX_QUEUE_SIZE)
+    {
+        serverSocket_.setReuseAddress(true);
+        serverSocket_.setReusePort(true);
+    }
+
+    TcpServiceAdapter::~TcpServiceAdapter()
+    {
+        stop();
+    }
+
+    bool TcpServiceAdapter::start()
+    {
+        if (running_)
+            return false;
+
+        running_ = true;
+        acceptThread_ = std::thread(&TcpServiceAdapter::acceptLoop, this);
+        return true;
+    }
+
+    void TcpServiceAdapter::stop()
+    {
+        if (!running_)
+            return;
+
+        running_ = false;
+        serverSocket_.close();
+        messageQueue_.close();
+
+        if (acceptThread_.joinable())
+        {
+            acceptThread_.join();
+        }
+    }
+
+    void TcpServiceAdapter::acceptLoop()
+    {
+        while (running_)
+        {
+            try
+            {
+                Poco::Net::StreamSocket socket = serverSocket_.acceptConnection();
+                socket.setReceiveTimeout(Poco::Timespan(SOCKET_TIMEOUT_MS * 1000));
+                handleClient(std::move(socket));
+            }
+            catch (const Poco::TimeoutException &)
+            {
+                // Expected timeout, continue
+                continue;
+            }
+            catch (const std::exception &ex)
+            {
+                LOG_F(ERROR, "Error accepting connection: %s", ex.what());
+            }
+        }
+    }
+
+    bool TcpServiceAdapter::receiveData(Poco::Net::StreamSocket &socket, char *buffer, int length)
+    {
+        try
+        {
+            int received = socket.receiveBytes(buffer, length);
+            return received > 0;
+        }
+        catch (const Poco::TimeoutException &)
+        {
+            return true; // Continue on timeout
+        }
+        catch (const std::exception &ex)
+        {
+            LOG_F(ERROR, "Error receiving data: %s", ex.what());
+            return false;
+        }
+    }
+
+    bool TcpServiceAdapter::parseMessage(std::string_view buffer, domain::FinancePackageMessage &message)
+    {
+        if (buffer.empty())
+            return false;
+
+        // Copy the buffer data to message.ap_data.buffer
+        size_t copySize = std::min(buffer.size(), sizeof(message.ap_data.data.buffer));
+        std::copy_n(buffer.begin(), copySize, message.ap_data.data.buffer);
+        return true;
+    }
+
+    void TcpServiceAdapter::handleClient(Poco::Net::StreamSocket socket)
+    {
+        try
+        {
+            std::vector<char> buffer(4096);
+            while (running_)
+            {
+                if (!receiveData(socket, buffer.data(), buffer.size()))
+                {
+                    break;
+                }
+
+                domain::FinancePackageMessage message;
+                // Parse message from buffer using string_view to avoid copies
+                std::string_view bufferView(buffer.data(), buffer.size());
+                if (parseMessage(bufferView, message))
+                {
+                    if (messageQueue_.push(std::move(message)))
                     {
-                        std::unique_lock<std::mutex> lock(bufferMutex_);
-
-                        if (buffer_.size() == 0)
-                        {
-                            lock.unlock();
-                            std::this_thread::sleep_for(1ms);
-                            continue;
-                        }
-
-                        // Search for packet delimiter ('\n')
-                        auto bufferBegin = buffer_.begin();
-                        auto bufferEnd = buffer_.end();
-                        auto newlinePos = std::find(bufferBegin + searchedIndex, bufferEnd, '\n');
-
-                        if (newlinePos == bufferEnd)
-                        {
-                            searchedIndex = buffer_.size();
-                            lock.unlock();
-                            std::this_thread::sleep_for(1ms);
-                            continue;
-                        }
-
-                        packetLength = newlinePos - bufferBegin;
-
-                        if (packetLength == 2)
-                        {
-                            // Special case: keep-alive packet
-                            LOG_F(INFO, "Received keep-alive packet");
-                            std::copy(newlinePos + 1, bufferEnd, bufferBegin);
-                            buffer_.resize(buffer_.size() - packetLength - 1);
-                            searchedIndex = 0;
-                            continue;
-                        }
-
-                        // Allocate and copy packet data
-                        packetData = new char[packetLength + 1];
-                        packetData[packetLength] = '\0';
-                        std::copy(bufferBegin, newlinePos, packetData);
-
-                        // Remove processed data from buffer
-                        std::copy(newlinePos + 1, bufferEnd, bufferBegin);
-                        buffer_.resize(buffer_.size() - packetLength - 1);
-                        searchedIndex = 0;
-                    } // Buffer lock released here
-
-                    // Process packet outside the lock
-                    if (packetData != nullptr)
-                    {
-                        packetQueue_->enqueue(packetData);
+                        handler_->processData(message.ap_data);
                     }
                 }
             }
+        }
+        catch (const std::exception &ex)
+        {
+            LOG_F(ERROR, "Error handling client: %s", ex.what());
+        }
+    }
 
-            // FinanceServiceConnection 實現
-            FinanceServiceConnection::FinanceServiceConnection(
-                const Poco::Net::StreamSocket &socket,
-                std::shared_ptr<PacketDispatcher> dispatcher)
-                : Poco::Net::TCPServerConnection(socket), dispatcher_(dispatcher)
-            {
-            }
-
-            void FinanceServiceConnection::run()
-            {
-                try
-                {
-                    Poco::Buffer<char> buffer(MAX_BUFFER_SIZE);
-
-                    while (true)
-                    {
-                        int n = socket().receiveBytes(buffer.begin(), buffer.capacity());
-                        if (n <= 0)
-                        {
-                            break; // 客戶端斷開連接
-                        }
-
-                        dispatcher_->addData(buffer.begin(), n);
-                    }
-                }
-                catch (const Poco::Exception &ex)
-                {
-                    LOG_F(ERROR, "Connection error: %s", ex.displayText().c_str());
-                }
-                catch (const std::exception &ex)
-                {
-                    LOG_F(ERROR, "Connection error: %s", ex.what());
-                }
-            }
-
-            // FinanceServiceConnectionFactory 實現
-            FinanceServiceConnectionFactory::FinanceServiceConnectionFactory(
-                std::shared_ptr<PacketDispatcher> dispatcher)
-                : dispatcher_(dispatcher)
-            {
-            }
-
-            Poco::Net::TCPServerConnection *FinanceServiceConnectionFactory::createConnection(
-                const Poco::Net::StreamSocket &socket)
-            {
-                return new FinanceServiceConnection(socket, dispatcher_);
-            }
-
-            // TcpServiceAdapter 實現
-            TcpServiceAdapter::TcpServiceAdapter(int port, std::shared_ptr<domain::IPackageHandler> handler)
-                : serverSocket_(Poco::Net::SocketAddress("0.0.0.0", port)), handler_(std::move(handler)), messageQueue_(MAX_QUEUE_SIZE)
-            {
-                serverSocket_.setReuseAddress(true);
-                serverSocket_.setReusePort(true);
-            }
-
-            TcpServiceAdapter::~TcpServiceAdapter()
-            {
-                stop();
-            }
-
-            bool TcpServiceAdapter::start()
-            {
-                if (running_)
-                    return false;
-
-                running_ = true;
-                acceptThread_ = std::thread(&TcpServiceAdapter::acceptLoop, this);
-                return true;
-            }
-
-            void TcpServiceAdapter::stop()
-            {
-                if (!running_)
-                    return;
-
-                running_ = false;
-                serverSocket_.close();
-                messageQueue_.close();
-
-                if (acceptThread_.joinable())
-                {
-                    acceptThread_.join();
-                }
-            }
-
-            void TcpServiceAdapter::acceptLoop()
-            {
-                while (running_)
-                {
-                    try
-                    {
-                        Poco::Net::StreamSocket socket = serverSocket_.acceptConnection();
-                        socket.setReceiveTimeout(Poco::Timespan(SOCKET_TIMEOUT_MS * 1000));
-                        handleClient(std::move(socket));
-                    }
-                    catch (const Poco::TimeoutException &)
-                    {
-                        // Expected timeout, continue
-                        continue;
-                    }
-                    catch (const std::exception &ex)
-                    {
-                        LOG_F(ERROR, "Error accepting connection: %s", ex.what());
-                    }
-                }
-            }
-
-            void TcpServiceAdapter::handleClient(Poco::Net::StreamSocket socket)
-            {
-                try
-                {
-                    char buffer[4096];
-                    while (running_)
-                    {
-                        if (!receiveData(socket, buffer, sizeof(buffer)))
-                        {
-                            break;
-                        }
-
-                        domain::FinancePackageMessage message;
-                        // Parse message from buffer...
-                        if (messageQueue_.push(message))
-                        {
-                            handler_->processData(message.ap_data);
-                        }
-                    }
-                }
-                catch (const std::exception &ex)
-                {
-                    LOG_F(ERROR, "Error handling client: %s", ex.what());
-                }
-            }
-
-            bool TcpServiceAdapter::receiveData(Poco::Net::StreamSocket &socket, char *buffer, int length)
-            {
-                try
-                {
-                    int received = socket.receiveBytes(buffer, length);
-                    return received > 0;
-                }
-                catch (const Poco::TimeoutException &)
-                {
-                    return true; // Continue on timeout
-                }
-                catch (const std::exception &ex)
-                {
-                    LOG_F(ERROR, "Error receiving data: %s", ex.what());
-                    return false;
-                }
-            }
-
-        } // namespace network
-    } // namespace infrastructure
-} // namespace finance
+} // namespace finance::infrastructure::network
