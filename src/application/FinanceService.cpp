@@ -15,20 +15,15 @@ namespace finance
         {
             try
             {
-                // Check if we need to initialize indices
-                bool initIndices = (argc > 1);
-
                 // Load configuration
-                auto configProvider = std::make_shared<finance::infrastructure::storage::ConfigAdapter>();
+                configProvider = std::make_unique<infrastructure::config::ConnectionConfigProvider>("connection.json");
                 if (!configProvider->loadFromFile("connection.json"))
                 {
                     LOG_F(WARNING, "Failed to load configuration, using defaults");
                 }
-                config = configProvider->getConfig();
-                config.initializeIndices = initIndices;
 
                 // Initialize area branch mapping
-                areaBranchRepo = std::make_shared<finance::infrastructure::storage::AreaBranchAdapter>(config.redisUrl);
+                areaBranchRepo = std::make_shared<infrastructure::config::AreaBranchProvider>(configProvider->getRedisUrl());
                 if (!areaBranchRepo->loadFromFile("area_branch.json"))
                 {
                     LOG_F(ERROR, "Failed to load area-branch mapping");
@@ -36,11 +31,11 @@ namespace finance
                 }
 
                 // Initialize Redis repository
-                LOG_F(INFO, "Connecting to Redis at %s", config.redisUrl.c_str());
-                repository = std::make_shared<finance::infrastructure::storage::RedisSummaryAdapter>(
-                    config.redisUrl);
+                LOG_F(INFO, "Connecting to Redis at %s", configProvider->getRedisUrl().c_str());
+                repository = std::make_shared<infrastructure::storage::RedisSummaryAdapter>(
+                    configProvider->getRedisUrl());
 
-                if (config.initializeIndices)
+                if (configProvider->IsInitializeIndices())
                 {
                     LOG_F(INFO, "Initializing search indices");
                     repository->createIndex();
@@ -60,9 +55,9 @@ namespace finance
             try
             {
                 // Create and start TCP service
-                LOG_F(INFO, "Starting TCP service on port %d", config.serverPort);
+                LOG_F(INFO, "Starting TCP service on port %d", configProvider->getServerPort());
                 tcpService = std::make_unique<infrastructure::network::TcpServiceAdapter>(
-                    config.serverPort,
+                    configProvider->getServerPort(),
                     nullptr); // TODO: Add packet handler
 
                 if (!tcpService->start())

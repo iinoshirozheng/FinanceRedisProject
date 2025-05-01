@@ -2,16 +2,17 @@
 
 #include <string>
 #include <string_view>
-#include "../domain/FinanceDataStructures.h"
+#include "../domain/FinanceDataStructure.h"
 #include <cctype>
+#include <cstring>
+#include <nlohmann/json.hpp>
 
 namespace finance
 {
     namespace common
     {
 #define VAL_SIZE(_DATA_) _DATA_, std::strlen(_DATA_)
-#define STR_VIEW(_CHAR_) FinanceUtils::trim_right_view(_CHAR_, sizeof(_CHAR_))
-#define BACK_OFFICE_INT(_DATA_) FinanceUtils::backOfficeToInt(_DATA_, sizeof(_DATA_))
+#define STR_VIEW(_STR_) FinanceUtils::trim_right_view(_STR_)
 
         // 金融工具函數
         class FinanceUtils
@@ -54,39 +55,41 @@ namespace finance
             }
 
             // 提取指定長度的字符串，並移除尾部空格
-            static inline void trim_right_cstr(char *string, size_t length)
+            static inline std::string trim_right(const char *str, size_t length)
             {
-                // 如果字串是空的，或者長度是 0，直接返回
-                if (string == nullptr || length == 0)
-                {
-                    return;
-                }
-                // 從字串末尾開始，向左掃描
-                char *end = string + length - 1;
-                while (end >= string && std::isspace(static_cast<unsigned char>(*end)))
-                {
-                    --end; // 移動指針到非空白的地方
-                }
-
-                // 將最後的有效字元的下一個位置設定為 '\0'
-                *(end + 1) = '\0';
-            }
-
-            // 提取指定長度的字符串，並移除尾部空格
-            static inline std::string_view trim_right_view(const char *string, size_t length)
-            {
-                if (string == nullptr || length == 0)
+                if (str == nullptr)
                 {
                     return "";
                 }
 
-                size_t end = length;
-                while (end > 0 && std::isspace(static_cast<unsigned char>(string[end - 1])))
+                while (length > 0 && std::isspace(static_cast<unsigned char>(str[length - 1])))
                 {
-                    --end;
+                    --length; // 向左推進，直到找到非空白字符
                 }
+                return std::string(str, length);
+            }
 
-                return std::string_view(string, end); // 返回字符串视图
+            // 提取指定長度的字符串，並移除尾部空格
+            static inline std::string_view trim_right_view(const std::string &str)
+            {
+                auto end = str.find_last_not_of(" \t\n\r");
+                if (end == std::string::npos)
+                {
+                    return std::string_view(str.data(), 0);
+                }
+                return std::string_view(str.data(), end + 1);
+            }
+
+            static inline std::string_view trim_right_view(const char *str)
+            {
+                if (!str)
+                    return std::string_view();
+                size_t len = strlen(str);
+                while (len > 0 && std::isspace(static_cast<unsigned char>(str[len - 1])))
+                {
+                    --len;
+                }
+                return std::string_view(str, len);
             }
 
             // 從系統標頭確定消息類型
@@ -106,37 +109,9 @@ namespace finance
 
             // 通用模板函數，用於根據任意數據結構創建唯一鍵
             template <typename T>
-            static inline std::string generateKey(const T &data, const std::string &area_center = "", const std::string &stock_id = "", const std::string &broker_id = "")
+            static std::string generateKey(const T &data)
             {
-                using namespace std::string_literals;
-
-                if constexpr (std::is_same_v<T, domain::MessageDataHCRTM01>)
-                {
-                    std::string area_center = trim_right(VAL_SIZE(data.areaCenter));
-                    std::string stock_id = trim_right(VAL_SIZE(data.stockId));
-                    return "summary:"s + area_center + ":" + stock_id;
-                }
-                else if constexpr (std::is_same_v<T, domain::MessageDataHCRTM05P>)
-                {
-                    std::string broker_id = trim_right(VAL_SIZE(data.brokerId));
-                    std::string stock_id = trim_right(VAL_SIZE(data.stockId));
-                    return "summary:"s + broker_id + ":" + std::string(data.stockId, sizeof(data.stockId));
-                }
-                else if constexpr (std::is_same_v<T, domain::SummaryData>)
-                {
-                    std::string area_center = trim_right(VAL_SIZE(data.areaCenter));
-                    std::string stock_id = trim_right(VAL_SIZE(data.stockId));
-                    return "summary:"s + area_center + ":" + stock_id;
-                }
-                else if constexpr (std::is_same_v<T, char *>)
-                {
-                    std::string stock_id = trim_right(VAL_SIZE(data));
-                    return "summary:ALL:"s + stock_id;
-                }
-                else
-                {
-                    static_assert(sizeof(T) == 0, "createKeyForMessage : 未支援的數據結構");
-                }
+                return "summary:" + data.areaCenter + ":" + data.stockId;
             }
 
             inline long long BackOfficeInt(const std::string &value)

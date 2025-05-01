@@ -5,7 +5,7 @@ set(DOMAIN_SOURCES
 )
 
 set(DOMAIN_HEADERS
-    domain/FinanceDataStructures.h
+    domain/FinanceDataStructure.h
     domain/IFinanceRepository.h
     domain/IPacketHandler.h
 )
@@ -20,14 +20,11 @@ set(APPLICATION_SOURCES
 
 set(INFRASTRUCTURE_STORAGE_SOURCES
     infrastructure/storage/RedisSummaryAdapter.cpp
-    infrastructure/storage/AreaBranchAdapter.cpp
 )
 
 set(INFRASTRUCTURE_NETWORK_SOURCES
     infrastructure/network/TcpServiceAdapter.cpp
-)
-
-set(INFRASTRUCTURE_HEADERS
+    infrastructure/network/PacketQueue.cpp
 )
 
 set(SOURCES
@@ -53,9 +50,16 @@ endif()
 add_library(finance_lib STATIC
     ${SOURCES}
     ${THIRD_PARTY_SOURCES}
-    ${INFRASTRUCTURE_HEADERS}
-    ${DOMAIN_HEADERS}
-    ${COMMON_HEADERS}
+)
+
+target_include_directories(finance_lib PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/lib/hiredis/include
+    ${CMAKE_SOURCE_DIR}/lib/nlohmann_json/single_include
+    ${CMAKE_SOURCE_DIR}/lib/loguru
+    ${CMAKE_SOURCE_DIR}/lib/poco/Foundation/include
+    ${CMAKE_SOURCE_DIR}/lib/poco/Net/include
 )
 
 target_link_libraries(finance_lib
@@ -64,15 +68,4 @@ target_link_libraries(finance_lib
     dl
     PocoFoundation
     PocoNet
-)
-
-# Set include directories
-target_include_directories(finance_lib PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/lib/hiredis/include
-    ${CMAKE_SOURCE_DIR}/lib/nlohmann_json/include
-    ${CMAKE_SOURCE_DIR}/lib/loguru
-    ${CMAKE_SOURCE_DIR}/lib/poco/Foundation/include
-    ${CMAKE_SOURCE_DIR}/lib/poco/Net/include
 ) 

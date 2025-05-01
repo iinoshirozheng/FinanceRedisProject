@@ -1,5 +1,5 @@
 #include "TcpServiceAdapter.h"
-#include "../../domain/FinanceDataStructures.h"
+#include "../../domain/FinanceDataStructure.h"
 #include "../../../lib/loguru/loguru.hpp"
 #include <iostream>
 #include <algorithm>

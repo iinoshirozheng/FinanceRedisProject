@@ -1,47 +1,38 @@
 #pragma once
 
+#include "../../domain/FinanceDataStructure.h"
+#include "../../domain/IFinanceRepository.h"
+#include <hiredis/hiredis.h>
+#include <memory>
 #include <string>
 #include <vector>
+#include <map>
 #include <optional>
-#include <memory>
-#include "../../domain/IFinanceRepository.h"
-#include "../../domain/FinanceDataStructures.h"
-#include <hiredis/hiredis.h>
+#include <mutex>
 
-// Forward declare redisContext from hiredis
-struct redisContext;
-struct redisReply;
-
-namespace finance
+namespace finance::infrastructure::storage
 {
-    namespace infrastructure
+
+    class RedisSummaryAdapter : public domain::IFinanceRepository<domain::SummaryData>
     {
-        namespace storage
-        {
-            class RedisSummaryAdapter : public domain::IFinanceRepository<domain::SummaryData>
-            {
-            public:
-                RedisSummaryAdapter(const std::string &redis_url);
-                ~RedisSummaryAdapter();
+    public:
+        explicit RedisSummaryAdapter(const std::string &redis_url);
+        ~RedisSummaryAdapter() override;
 
-                /* Implementing IFinanceRepository methods */
-                bool save(const domain::SummaryData &data) override;
-                domain::SummaryData *get(const std::string &key) override;
-                bool update(const domain::SummaryData &data, const std::string &key) override;
-                bool remove(const std::string &key) override;
-                std::vector<domain::SummaryData> loadAll() override;
-                std::map<std::string, domain::SummaryData> getAllMapped() override;
-                std::vector<domain::SummaryData> getAllBySecondaryKey(const std::string &secondaryKey) override;
-                bool createIndex() override;
+        bool save(const domain::SummaryData &data) override;
+        domain::SummaryData *get(const std::string &key) override;
+        bool update(const std::string &key, const domain::SummaryData &data) override;
+        bool remove(const std::string &key) override;
+        std::vector<domain::SummaryData> loadAll() override;
+        std::map<std::string, domain::SummaryData> getAllMapped() override;
+        std::vector<domain::SummaryData> getAllBySecondaryKey(const std::string &secondaryKey) override;
+        bool createIndex() override;
+        bool updateCompanySummary(const std::string &stock_id);
 
-            private:
-                domain::ConfigData config_;
-                // Redis connection context
-                redisContext *context;
-            };
+    private:
+        redisContext *context_ptr_;
+        std::string redisUrl_;
+        std::mutex mapLock_;
+    };
 
-        } // namespace storage
-
-    } // namespace infrastructure
-
-} // namespace finance
+} // namespace finance::infrastructure::storage

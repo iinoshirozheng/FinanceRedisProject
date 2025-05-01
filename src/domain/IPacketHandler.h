@@ -2,7 +2,7 @@
 
 #include <memory>
 #include <string>
-#include "./FinanceDataStructures.h"
+#include "./FinanceDataStructure.h"
 #include "../common/FinanceUtils.hpp"
 
 namespace finance

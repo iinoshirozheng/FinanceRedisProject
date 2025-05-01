@@ -1,11 +1,11 @@
 #pragma once
 
-#include "../domain/FinanceDataStructures.h"
+#include "../domain/FinanceDataStructure.h"
 #include "../domain/IFinanceRepository.h"
 #include "../domain/IPacketHandler.h"
 #include "../infrastructure/storage/RedisSummaryAdapter.h"
-#include "../infrastructure/storage/AreaBranchAdapter.h"
-#include "../infrastructure/config/ConfigAdapter.hpp"
+#include "../infrastructure/config/AreaBranchProvider.hpp"
+#include "../infrastructure/config/ConnectionConfigProvider.hpp"
 #include "../infrastructure/network/TcpServiceAdapter.h"
 #include <memory>
 #include <string>
@@ -48,17 +48,17 @@ namespace finance
              * @brief Get the Area Branch Repository
              * @return The area branch repository instance
              */
-            std::shared_ptr<finance::infrastructure::storage::AreaBranchAdapter> getAreaBranchRepo() const
+            std::shared_ptr<infrastructure::config::AreaBranchProvider> getAreaBranchRepo() const
             {
                 return areaBranchRepo;
             }
 
         private:
-            std::shared_ptr<finance::infrastructure::storage::RedisSummaryAdapter> repository;
-            std::shared_ptr<finance::infrastructure::storage::AreaBranchAdapter> areaBranchRepo;
+            std::shared_ptr<infrastructure::storage::RedisSummaryAdapter> repository;
+            std::shared_ptr<infrastructure::config::AreaBranchProvider> areaBranchRepo;
             std::unique_ptr<infrastructure::network::TcpServiceAdapter> tcpService;
             volatile std::sig_atomic_t signalStatus = 0;
-            domain::ConfigData config;
+            std::unique_ptr<infrastructure::config::ConnectionConfigProvider> configProvider;
         };
     } // namespace application
 } // namespace finance

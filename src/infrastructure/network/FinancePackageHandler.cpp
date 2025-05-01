@@ -8,30 +8,32 @@ namespace finance
     {
         namespace network
         {
+
+#define BACK_OFFICE_INT(_DATA_) common::FinanceUtils::backOfficeToInt(_DATA_, sizeof(_DATA_))
             bool Hcrtm01Handler::processData(domain::ApData &ap_data)
             {
                 const domain::MessageDataHCRTM01 &hcrtm01 = ap_data.data.hcrtm01;
                 if (common::STR_VIEW(hcrtm01.area_center) == common::STR_VIEW(ap_data.system))
                 {
                     // Convert string values to integers
-                    int64_t margin_amount = common::BACK_OFFICE_INT(hcrtm01.margin_amount);
-                    int64_t margin_buy_order_amount = common::BACK_OFFICE_INT(hcrtm01.margin_buy_order_amount);
-                    int64_t margin_sell_match_amount = common::BACK_OFFICE_INT(hcrtm01.margin_sell_match_amount);
-                    int64_t margin_qty = common::BACK_OFFICE_INT(hcrtm01.margin_qty);
-                    int64_t margin_buy_order_qty = common::BACK_OFFICE_INT(hcrtm01.margin_buy_order_qty);
-                    int64_t margin_sell_match_qty = common::BACK_OFFICE_INT(hcrtm01.margin_sell_match_qty);
-                    int64_t short_amount = common::BACK_OFFICE_INT(hcrtm01.short_amount);
-                    int64_t short_sell_order_amount = common::BACK_OFFICE_INT(hcrtm01.short_sell_order_amount);
-                    int64_t short_qty = common::BACK_OFFICE_INT(hcrtm01.short_qty);
-                    int64_t short_sell_order_qty = common::BACK_OFFICE_INT(hcrtm01.short_sell_order_qty);
-                    int64_t short_after_hour_sell_order_amount = common::BACK_OFFICE_INT(hcrtm01.short_after_hour_sell_order_amount);
-                    int64_t short_after_hour_sell_order_qty = common::BACK_OFFICE_INT(hcrtm01.short_after_hour_sell_order_qty);
-                    int64_t short_sell_match_amount = common::BACK_OFFICE_INT(hcrtm01.short_sell_match_amount);
-                    int64_t short_sell_match_qty = common::BACK_OFFICE_INT(hcrtm01.short_sell_match_qty);
-                    int64_t margin_after_hour_buy_order_amount = common::BACK_OFFICE_INT(hcrtm01.margin_after_hour_buy_order_amount);
-                    int64_t margin_after_hour_buy_order_qty = common::BACK_OFFICE_INT(hcrtm01.margin_after_hour_buy_order_qty);
-                    int64_t margin_buy_match_amount = common::BACK_OFFICE_INT(hcrtm01.margin_buy_match_amount);
-                    int64_t margin_buy_match_qty = common::BACK_OFFICE_INT(hcrtm01.margin_buy_match_qty);
+                    int64_t margin_amount = BACK_OFFICE_INT(hcrtm01.margin_amount);
+                    int64_t margin_buy_order_amount = BACK_OFFICE_INT(hcrtm01.margin_buy_order_amount);
+                    int64_t margin_sell_match_amount = BACK_OFFICE_INT(hcrtm01.margin_sell_match_amount);
+                    int64_t margin_qty = BACK_OFFICE_INT(hcrtm01.margin_qty);
+                    int64_t margin_buy_order_qty = BACK_OFFICE_INT(hcrtm01.margin_buy_order_qty);
+                    int64_t margin_sell_match_qty = BACK_OFFICE_INT(hcrtm01.margin_sell_match_qty);
+                    int64_t short_amount = BACK_OFFICE_INT(hcrtm01.short_amount);
+                    int64_t short_sell_order_amount = BACK_OFFICE_INT(hcrtm01.short_sell_order_amount);
+                    int64_t short_qty = BACK_OFFICE_INT(hcrtm01.short_qty);
+                    int64_t short_sell_order_qty = BACK_OFFICE_INT(hcrtm01.short_sell_order_qty);
+                    int64_t short_after_hour_sell_order_amount = BACK_OFFICE_INT(hcrtm01.short_after_hour_sell_order_amount);
+                    int64_t short_after_hour_sell_order_qty = BACK_OFFICE_INT(hcrtm01.short_after_hour_sell_order_qty);
+                    int64_t short_sell_match_amount = BACK_OFFICE_INT(hcrtm01.short_sell_match_amount);
+                    int64_t short_sell_match_qty = BACK_OFFICE_INT(hcrtm01.short_sell_match_qty);
+                    int64_t margin_after_hour_buy_order_amount = BACK_OFFICE_INT(hcrtm01.margin_after_hour_buy_order_amount);
+                    int64_t margin_after_hour_buy_order_qty = BACK_OFFICE_INT(hcrtm01.margin_after_hour_buy_order_qty);
+                    int64_t margin_buy_match_amount = BACK_OFFICE_INT(hcrtm01.margin_buy_match_amount);
+                    int64_t margin_buy_match_qty = BACK_OFFICE_INT(hcrtm01.margin_buy_match_qty);
 
                     // Calculate available amounts
                     int64_t after_margin_available_amount = margin_amount - margin_buy_match_amount + margin_sell_match_amount - margin_after_hour_buy_order_amount;
@@ -72,8 +74,8 @@ namespace finance
                 const domain::MessageDataHCRTM05P &hcrtm05p = ap_data.data.hcrtm05p;
 
                 // Convert string values to integers
-                int64_t margin_buy_offset_qty = common::BACK_OFFICE_INT(hcrtm05p.margin_buy_offset_qty);
-                int64_t short_sell_offset_qty = common::BACK_OFFICE_INT(hcrtm05p.short_sell_offset_qty);
+                int64_t margin_buy_offset_qty = BACK_OFFICE_INT(hcrtm05p.margin_buy_offset_qty);
+                int64_t short_sell_offset_qty = BACK_OFFICE_INT(hcrtm05p.short_sell_offset_qty);
 
                 // Create summary data
                 domain::SummaryData summary_data;

@@ -48,17 +48,12 @@ namespace finance
                 void stopProcessing();
 
             private:
+                void processPackets(std::function<void(char *)> processingFunction);
                 std::queue<char *> queue_;
                 std::mutex queueMutex_;
                 std::condition_variable queueCondition_;
                 std::atomic<bool> running_;
                 std::thread processingThread_;
-
-                /**
-                 * 數據包處理線程函數
-                 * @param processingFunction 處理每個數據包的函數
-                 */
-                void processPackets(std::function<void(char *)> processingFunction);
             };
 
         } // namespace network

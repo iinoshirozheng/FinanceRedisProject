@@ -151,13 +151,5 @@ namespace finance
             ApData ap_data;     // AP 資料
         };
 
-        // 配置數據
-        struct ConfigData
-        {
-            std::string redisUrl;
-            int serverPort;
-            bool initializeIndices = false;
-        };
-
     }
 }

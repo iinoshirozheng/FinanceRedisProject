@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 #include <map>
-#include "./FinanceDataStructures.h"
+#include "./FinanceDataStructure.h"
 
 namespace finance
 {
@@ -40,7 +40,7 @@ namespace finance
              * @param key The key to identify the entity
              * @return true if updated successfully, false otherwise
              */
-            virtual bool update(const Data &data, const std::string &key) = 0;
+            virtual bool update(const std::string &key, const Data &data) = 0;
 
             /**
              * @brief Delete a data entity
@@ -73,25 +73,6 @@ namespace finance
              * @return true if the index was created successfully, false otherwise
              */
             virtual bool createIndex() = 0;
-        };
-
-        // 提供 Config 配置數據介面
-        class IConfigProvider
-        {
-        public:
-            virtual ~IConfigProvider() = default;
-
-            // 獲取配置數據
-            // @return 配置數據
-            virtual domain::ConfigData getConfig() = 0;
-
-            // 從文件中載入配置
-            // @param filePath 配置文件路徑
-            // @return 如果載入成功則返回 true
-            virtual bool loadFromFile(const std::string &filePath) = 0;
-
-            // 確認是不是沒有 load 資料
-            virtual bool empty() = 0;
         };
 
     } // namespace domain

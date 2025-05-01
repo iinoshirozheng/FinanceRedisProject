@@ -83,10 +83,8 @@ namespace finance
                     char *data = nullptr;
                     if (tryDequeue(data))
                     {
-                        if (data != nullptr)
-                        {
-                            processingFunction(data);
-                        }
+                        processingFunction(data);
+                        delete[] data;
                     }
                 }
             }
