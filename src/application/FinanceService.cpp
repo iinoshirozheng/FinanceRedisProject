@@ -48,6 +48,24 @@ namespace finance::application
                 configProvider->getServerPort(),
                 packetHandler_);
 
+            // Load all data from Redis
+            LOG_F(INFO, "Loading data from Redis...");
+            auto allData = repository_->loadAll();
+            LOG_F(INFO, "Loaded %zu records from Redis", allData.size());
+
+            // Update company summaries for all stocks
+            std::set<std::string> processedStocks;
+            for (const auto &data : allData)
+            {
+                if (processedStocks.insert(data.stockId).second)
+                {
+                    if (!repository_->updateCompanySummary(data.stockId))
+                    {
+                        LOG_F(WARNING, "Failed to update company summary for stock: %s", data.stockId.c_str());
+                    }
+                }
+            }
+
             return domain::Status::ok();
         }
         catch (const std::exception &ex)

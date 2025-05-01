@@ -1,11 +1,7 @@
 #pragma once
 
-#include <Poco/Net/TCPServer.h>
-#include <Poco/Net/TCPServerConnection.h>
-#include <Poco/Net/TCPServerConnectionFactory.h>
 #include <Poco/Net/ServerSocket.h>
 #include <Poco/Net/StreamSocket.h>
-#include <Poco/Net/SocketAddress.h>
 #include <memory>
 #include <thread>
 #include <atomic>
@@ -15,104 +11,18 @@
 
 namespace finance::infrastructure::network
 {
-
-    /**
-     * 用於緩衝和分發傳入數據包數據的類
-     */
-    class PacketDispatcher
-    {
-    public:
-        /**
-         * 構造函數
-         * @param maxBufferSize 最大緩衝區大小
-         * @param packetQueue 用於分發數據包的隊列
-         */
-        PacketDispatcher(size_t maxBufferSize, std::shared_ptr<PacketQueue> packetQueue);
-
-        /**
-         * 析構函數
-         */
-        ~PacketDispatcher();
-
-        /**
-         * 向緩衝區添加數據
-         * @param data 要添加的數據
-         * @param size 數據的大小
-         */
-        void addData(const char *data, size_t size);
-
-        /**
-         * 啟動數據包分發線程
-         */
-        void startDispatching();
-
-        /**
-         * 停止數據包分發線程
-         */
-        void stopDispatching();
-
-    private:
-        Poco::Buffer<char> buffer_;
-        std::mutex bufferMutex_;
-        std::shared_ptr<PacketQueue> packetQueue_;
-        std::atomic<bool> running_;
-        std::thread dispatchThread_;
-
-        /**
-         * 數據包分發線程函數
-         */
-        void dispatchPackets();
-    };
-
-    /**
-     * TCP 服務連接實現
-     */
-    class FinanceServiceConnection : public Poco::Net::TCPServerConnection
-    {
-    public:
-        /**
-         * 構造函數
-         * @param socket 連接的套接字
-         * @param dispatcher 要使用的數據包分發器
-         */
-        FinanceServiceConnection(const Poco::Net::StreamSocket &socket,
-                                 std::shared_ptr<PacketDispatcher> dispatcher);
-
-        /**
-         * 運行連接
-         */
-        void run() override;
-
-    private:
-        std::shared_ptr<PacketDispatcher> dispatcher_;
-    };
-
-    /**
-     * TCP 服務連接工廠實現
-     */
-    class FinanceServiceConnectionFactory : public Poco::Net::TCPServerConnectionFactory
-    {
-    public:
-        /**
-         * 構造函數
-         * @param dispatcher 要使用的數據包分發器
-         */
-        explicit FinanceServiceConnectionFactory(std::shared_ptr<PacketDispatcher> dispatcher);
-
-        /**
-         * 創建新連接
-         * @param socket 連接的套接字
-         * @return 新的連接實例
-         */
-        Poco::Net::TCPServerConnection *createConnection(
-            const Poco::Net::StreamSocket &socket) override;
-
-    private:
-        std::shared_ptr<PacketDispatcher> dispatcher_;
-    };
+    // Constants for TCP service
+    static constexpr int MAX_BUFFER_SIZE = 4096;   // Maximum size of a single receive buffer
+    static constexpr int MAX_PACKET_SIZE = 4000;   // Maximum size of a single packet
+    static constexpr int SOCKET_TIMEOUT_MS = 1000; // Socket timeout in milliseconds
+    static constexpr int RECEIVE_RETRY_MS = 10;    // Time to wait when queue is full
 
     /**
      * 主要 TCP 服務適配器
+     * 負責：
+     * 1. 接受 TCP 連接
+     * 2. 接收和解析數據包
+     * 3. 將數據包加入處理隊列
      */
     class TcpServiceAdapter
     {
@@ -150,7 +60,7 @@ namespace finance::infrastructure::network
         std::shared_ptr<domain::IPackageHandler> handler_;
         std::atomic<bool> running_{false};
         std::thread acceptThread_;
-        static constexpr int SOCKET_TIMEOUT_MS = 1000;
+        PacketQueue packetQueue_;
     };
 
 } // namespace finance::infrastructure::network

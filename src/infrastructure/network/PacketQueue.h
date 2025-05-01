@@ -19,14 +19,17 @@ namespace finance::infrastructure::network
     class PacketQueue
     {
     public:
+        static constexpr size_t MAX_QUEUE_SIZE = 10000; // Maximum number of packets in queue
+
         PacketQueue();
         ~PacketQueue();
 
         /**
          * 將數據包添加到隊列
          * @param data 數據包數據的指針（所有權被轉移）
+         * @return true if enqueued successfully, false if queue is full
          */
-        void enqueue(std::vector<char> &&data);
+        bool enqueue(std::vector<char> &&data);
 
         /**
          * 嘗試從隊列中取出數據包

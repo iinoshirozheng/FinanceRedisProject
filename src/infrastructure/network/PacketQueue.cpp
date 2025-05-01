@@ -14,11 +14,16 @@ namespace finance::infrastructure::network
         stopProcessing();
     }
 
-    void PacketQueue::enqueue(std::vector<char> &&data)
+    bool PacketQueue::enqueue(std::vector<char> &&data)
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
+        if (queue_.size() >= MAX_QUEUE_SIZE)
+        {
+            return false;
+        }
         queue_.push(std::move(data));
         queueCondition_.notify_one();
+        return true;
     }
 
     bool PacketQueue::tryDequeue(std::vector<char> &data)

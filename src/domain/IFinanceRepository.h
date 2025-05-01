@@ -71,6 +71,13 @@ namespace finance::domain
          * @return true if the index was created successfully, false otherwise
          */
         virtual bool createIndex() = 0;
+
+        /**
+         * @brief Update the company summary for a specific stock
+         * @param stockId The stock ID to update the summary for
+         * @return true if updated successfully, false otherwise
+         */
+        virtual bool updateCompanySummary(const std::string &stockId) = 0;
     };
 
 } // namespace finance::domain

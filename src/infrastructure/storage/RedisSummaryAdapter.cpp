@@ -175,6 +175,9 @@ namespace finance::infrastructure::storage
                 return result;
             }
 
+            // Clear existing cache before loading new data
+            summaryCache_.clear();
+
             for (size_t i = 0; i < reply->elements; i++)
             {
                 std::string key = reply->element[i]->str;
@@ -182,6 +185,8 @@ namespace finance::infrastructure::storage
                 if (find(key, data))
                 {
                     result.push_back(data);
+                    // Initialize cache with loaded data
+                    summaryCache_[key] = data;
                 }
             }
             freeReplyObject(reply);
@@ -206,8 +211,69 @@ namespace finance::infrastructure::storage
 
     bool RedisSummaryAdapter::updateCompanySummary(const std::string &stock_id)
     {
-        (void)stock_id; // Mark parameter as intentionally unused
-        return false;   // TODO: Implement company summary update
+        try
+        {
+            if (!redisContext_)
+            {
+                auto status = connect();
+                if (!status.isOk())
+                {
+                    return false;
+                }
+            }
+
+            // Get all summaries for this stock
+            auto summaries = getAllBySecondaryKey(stock_id);
+            if (summaries.empty())
+            {
+                LOG_F(WARNING, "No summaries found for stock: %s", stock_id.c_str());
+                return false;
+            }
+
+            // Create aggregated summary
+            domain::SummaryData aggregated;
+            aggregated.stockId = stock_id;
+            aggregated.areaCenter = "ALL";
+
+            // Aggregate all values
+            for (const auto &summary : summaries)
+            {
+                aggregated.marginAvailableAmount += summary.marginAvailableAmount;
+                aggregated.marginAvailableQty += summary.marginAvailableQty;
+                aggregated.shortAvailableAmount += summary.shortAvailableAmount;
+                aggregated.shortAvailableQty += summary.shortAvailableQty;
+                aggregated.afterMarginAvailableAmount += summary.afterMarginAvailableAmount;
+                aggregated.afterMarginAvailableQty += summary.afterMarginAvailableQty;
+                aggregated.afterShortAvailableAmount += summary.afterShortAvailableAmount;
+                aggregated.afterShortAvailableQty += summary.afterShortAvailableQty;
+                aggregated.margin_buy_offset_qty += summary.margin_buy_offset_qty;
+                aggregated.short_sell_offset_qty += summary.short_sell_offset_qty;
+            }
+
+            // Get all branches
+            aggregated.belongBranches = areaBranchProvider_->getAllBranches();
+
+            // Save aggregated summary
+            std::string key = "summary:ALL:" + stock_id;
+            std::string json = serializeSummaryData(aggregated);
+
+            redisReply *reply = (redisReply *)redisCommand(redisContext_, "SET %s %s", key.c_str(), json.c_str());
+            if (!reply)
+            {
+                return false;
+            }
+
+            freeReplyObject(reply);
+
+            // Update cache
+            summaryCache_[key] = aggregated;
+            return true;
+        }
+        catch (const std::exception &ex)
+        {
+            LOG_F(ERROR, "Redis update company summary error: %s", ex.what());
+            return false;
+        }
     }
 
     std::string RedisSummaryAdapter::serializeSummaryData(const domain::SummaryData &data) const

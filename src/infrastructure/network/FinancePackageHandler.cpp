@@ -63,6 +63,13 @@ namespace finance::infrastructure::network
                 return false;
             }
 
+            // Update company summary
+            if (!repository_->updateCompanySummary(summary_data.stockId))
+            {
+                LOG_F(ERROR, "Failed to update company summary for stock: %s", summary_data.stockId.c_str());
+                return false;
+            }
+
             LOG_F(INFO, "Processed HCRTM01 data for stock: %s, area: %s",
                   summary_data.stockId.c_str(), summary_data.areaCenter.c_str());
             return true;
@@ -97,6 +104,13 @@ namespace finance::infrastructure::network
             return false;
         }
 
+        // Update company summary
+        if (!repository_->updateCompanySummary(summary_data.stockId))
+        {
+            LOG_F(ERROR, "Failed to update company summary for stock: %s", summary_data.stockId.c_str());
+            return false;
+        }
+
         LOG_F(INFO, "Processed HCRTM05P data for stock: %s, broker: %s",
               summary_data.stockId.c_str(), summary_data.areaCenter.c_str());
         return true;
@@ -119,10 +133,14 @@ namespace finance::infrastructure::network
             return false;
         }
 
-        auto handler = getProcessorHandler(std::string_view(ap_data.data.hcrtm01.area_center, sizeof(ap_data.data.hcrtm01.area_center)));
+        // Get the parent FinancePackageMessage
+        auto parent = reinterpret_cast<domain::FinancePackageMessage *>(
+            reinterpret_cast<char *>(&ap_data) - offsetof(domain::FinancePackageMessage, ap_data));
+
+        auto handler = getProcessorHandler(std::string_view(parent->t_code, sizeof(parent->t_code)));
         if (!handler)
         {
-            LOG_F(WARNING, "No handler found for area center: %s", std::string(ap_data.data.hcrtm01.area_center).c_str());
+            LOG_F(WARNING, "No handler found for t_code: %s", std::string(parent->t_code).c_str());
             return false;
         }
         return handler->processData(ap_data);
