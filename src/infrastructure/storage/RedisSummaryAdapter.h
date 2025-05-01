@@ -37,6 +37,7 @@ namespace finance::infrastructure::storage
         std::shared_ptr<config::ConnectionConfigProvider> configProvider_;
         std::shared_ptr<config::AreaBranchProvider> areaBranchProvider_;
         redisContext *redisContext_ = nullptr;
+        std::map<std::string, domain::SummaryData> summaryCache_;
 
         domain::Status connect();
         void disconnect();

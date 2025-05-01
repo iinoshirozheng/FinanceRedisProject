@@ -79,6 +79,9 @@ namespace finance::infrastructure::storage
             }
 
             freeReplyObject(reply);
+
+            // 更新 cache
+            summaryCache_[key] = data;
             return true;
         }
         catch (const std::exception &ex)
@@ -144,6 +147,9 @@ namespace finance::infrastructure::storage
             }
 
             freeReplyObject(reply);
+
+            // 從 cache 刪除
+            summaryCache_.erase(key);
             return true;
         }
         catch (const std::exception &ex)
@@ -189,36 +195,7 @@ namespace finance::infrastructure::storage
 
     std::map<std::string, domain::SummaryData> RedisSummaryAdapter::getAllMapped()
     {
-        std::map<std::string, domain::SummaryData> result;
-        if (!redisContext_)
-            return result;
-
-        try
-        {
-            redisReply *reply = (redisReply *)redisCommand(redisContext_, "KEYS summary:*");
-            if (!reply || reply->type != REDIS_REPLY_ARRAY)
-            {
-                if (reply)
-                    freeReplyObject(reply);
-                return result;
-            }
-
-            for (size_t i = 0; i < reply->elements; i++)
-            {
-                std::string key = reply->element[i]->str;
-                domain::SummaryData data;
-                if (find(key, data))
-                {
-                    result[key] = data;
-                }
-            }
-            freeReplyObject(reply);
-        }
-        catch (const std::exception &ex)
-        {
-            LOG_F(ERROR, "Redis getAllMapped error: %s", ex.what());
-        }
-        return result;
+        return summaryCache_;
     }
 
     bool RedisSummaryAdapter::update(const std::string &key, const domain::SummaryData &data)
@@ -335,9 +312,19 @@ namespace finance::infrastructure::storage
 
     domain::SummaryData *RedisSummaryAdapter::get(const std::string &key)
     {
+        // 先查 cache
+        auto it = summaryCache_.find(key);
+        if (it != summaryCache_.end())
+        {
+            return new domain::SummaryData(it->second);
+        }
+
+        // cache 沒有，去 Redis 查
         auto data = std::make_unique<domain::SummaryData>();
         if (find(key, *data))
         {
+            // 更新 cache
+            summaryCache_[key] = *data;
             return data.release();
         }
         return nullptr;

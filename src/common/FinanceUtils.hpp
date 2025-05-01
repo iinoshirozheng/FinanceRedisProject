@@ -123,21 +123,5 @@ namespace finance::common
                 return "";
             }
         }
-
-        inline long long BackOfficeInt(const std::string &value)
-        {
-            if (value.empty())
-                return 0;
-
-            auto last_char = value.back();
-            if (isdigit(last_char))
-            {
-                return std::stoll(value);
-            }
-
-            auto part1 = std::stoll(value.substr(0, value.length() - 1));
-            auto part2 = last_char - 'A' + 1;
-            return -1 * (part1 * 10 + part2);
-        }
     };
 } // namespace finance::common

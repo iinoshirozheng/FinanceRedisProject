@@ -145,15 +145,12 @@ namespace finance::infrastructure::network
         void handleClient(Poco::Net::StreamSocket socket);
         bool receiveData(Poco::Net::StreamSocket &socket, char *buffer, int length);
         bool parseMessage(std::string_view buffer, domain::FinancePackageMessage &message);
-        void dispatchPackets();
 
         Poco::Net::ServerSocket serverSocket_;
         std::shared_ptr<domain::IPackageHandler> handler_;
         std::atomic<bool> running_{false};
         std::thread acceptThread_;
-        BoundedQueue<domain::FinancePackageMessage> messageQueue_;
         static constexpr int SOCKET_TIMEOUT_MS = 1000;
-        static constexpr int MAX_QUEUE_SIZE = 1000;
     };
 
 } // namespace finance::infrastructure::network

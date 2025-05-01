@@ -171,7 +171,7 @@ namespace finance::infrastructure::network
 
     // TcpServiceAdapter 實現
     TcpServiceAdapter::TcpServiceAdapter(int port, std::shared_ptr<domain::IPackageHandler> handler)
-        : serverSocket_(Poco::Net::SocketAddress("0.0.0.0", port)), handler_(std::move(handler)), messageQueue_(MAX_QUEUE_SIZE)
+        : serverSocket_(Poco::Net::SocketAddress("0.0.0.0", port)), handler_(std::move(handler))
     {
         serverSocket_.setReuseAddress(true);
         serverSocket_.setReusePort(true);
@@ -199,7 +199,6 @@ namespace finance::infrastructure::network
 
         running_ = false;
         serverSocket_.close();
-        messageQueue_.close();
 
         if (acceptThread_.joinable())
         {
@@ -252,9 +251,12 @@ namespace finance::infrastructure::network
         if (buffer.empty())
             return false;
 
-        // Copy the buffer data to message.ap_data.buffer
-        size_t copySize = std::min(buffer.size(), sizeof(message.ap_data.data.buffer));
-        std::copy_n(buffer.begin(), copySize, message.ap_data.data.buffer);
+        // 檢查數據包格式
+        if (buffer.size() < sizeof(domain::FinancePackageMessage))
+            return false;
+
+        // 複製數據到 message
+        std::memcpy(&message, buffer.data(), sizeof(domain::FinancePackageMessage));
         return true;
     }
 
@@ -270,15 +272,13 @@ namespace finance::infrastructure::network
                     break;
                 }
 
-                domain::FinancePackageMessage message;
-                // Parse message from buffer using string_view to avoid copies
                 std::string_view bufferView(buffer.data(), buffer.size());
+                domain::FinancePackageMessage message;
+
                 if (parseMessage(bufferView, message))
                 {
-                    if (messageQueue_.push(std::move(message)))
-                    {
-                        handler_->processData(message.ap_data);
-                    }
+                    // 直接處理數據，不需要存儲到隊列
+                    handler_->processData(message.ap_data);
                 }
             }
         }
