@@ -17,7 +17,7 @@
 #include <set>
 #include <Poco/Buffer.h>
 #include <Poco/DateTime.h>
-#include <Poco/Timezone.h>
+#include <Poco/Timezone.setMaxThreadsh>
 #include <fstream>
 #include <iterator>
 #define FMT_HEADER_ONLY 1

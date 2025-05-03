@@ -3,65 +3,37 @@
 #include <memory>
 #include <thread>
 #include <atomic>
-#include <mutex>
-#include <condition_variable>
 #include <Poco/Net/ServerSocket.h>
 #include "RingBuffer.hpp"
 #include "../../domain/IPackageHandler.h"
 
 namespace finance::infrastructure::network
 {
-    // Constants for TCP service
-    static constexpr int MAX_BUFFER_SIZE = 4096;            // Maximum size of a single receive buffer
-    static constexpr int MAX_PACKET_SIZE = 4000;            // Maximum size of a single packet
-    static constexpr int SOCKET_TIMEOUT_MS = 1000;          // Socket timeout in milliseconds
-    static constexpr int RECEIVE_RETRY_MS = 10;             // Time to wait when buffer is full
-    static constexpr size_t RING_BUFFER_SIZE = 1024 * 1024; // 1MB buffer
+    static constexpr int SOCKET_TIMEOUT_MS = 1000;               // ms
+    static constexpr size_t RING_BUFFER_SIZE = 16 * 1024 * 1024; // 16MB
 
-    /**
-     * 主要 TCP 服務適配器
-     * 負責：
-     * 1. 接受 TCP 連接
-     * 2. 接收和解析數據包
-     * 3. 將數據包加入處理隊列
-     */
     class TcpServiceAdapter
     {
     public:
-        /**
-         * 構造函數
-         * @param port 要監聽的端口
-         * @param packetHandler 金融票據的處理器
-         */
-        TcpServiceAdapter(int port, std::shared_ptr<domain::IPackageHandler> handler);
-
-        /**
-         * 析構函數
-         */
+        TcpServiceAdapter(int port,
+                          std::shared_ptr<domain::IPackageHandler> handler);
         ~TcpServiceAdapter();
 
-        /**
-         * 啟動服務
-         * @return 如果成功啟動則返回真
-         */
         bool start();
-
-        /**
-         * 停止服務
-         */
         void stop();
 
     private:
-        void consumeLoop();
-        void produceLoop();
-        void handleClient(Poco::Net::StreamSocket socket);
+        void Producer();
+        void Consumer();
 
         Poco::Net::ServerSocket serverSocket_;
         std::shared_ptr<domain::IPackageHandler> handler_;
-        std::atomic<bool> running_;
-        std::shared_ptr<RingBuffer> ringBuffer_;
+        std::atomic<bool> running_{false};
+
+        // 改成直接成員，效能更好
+        RingBuffer<RING_BUFFER_SIZE> ringBuffer_;
+
         std::thread acceptThread_;
         std::thread processingThread_;
     };
-
-} // namespace finance::infrastructure::network
+}

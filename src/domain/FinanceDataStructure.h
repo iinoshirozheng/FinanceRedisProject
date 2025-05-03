@@ -20,17 +20,17 @@ namespace finance::domain
     */
     struct SummaryData
     {
-        int64_t marginAvailableAmount = 0;
-        int64_t marginAvailableQty = 0;
-        int64_t shortAvailableAmount = 0;
-        int64_t shortAvailableQty = 0;
-        int64_t afterMarginAvailableAmount = 0;
-        int64_t afterMarginAvailableQty = 0;
-        int64_t afterShortAvailableAmount = 0;
-        int64_t afterShortAvailableQty = 0;
-        std::string stockId;
-        std::string areaCenter;
-        std::vector<std::string> belongBranches;
+        int64_t margin_available_amount = 0;
+        int64_t margin_available_qty = 0;
+        int64_t short_available_amount = 0;
+        int64_t short_available_qty = 0;
+        int64_t after_margin_available_amount = 0;
+        int64_t after_margin_available_qty = 0;
+        int64_t after_short_available_amount = 0;
+        int64_t after_short_available_qty = 0;
+        std::string stock_id;
+        std::string area_center;
+        std::vector<std::string> belong_branches;
 
         // 新增資買賣互抵張數 (temp data)
         int64_t margin_buy_offset_qty;

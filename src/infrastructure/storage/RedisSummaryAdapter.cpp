@@ -235,17 +235,17 @@ namespace finance::infrastructure::storage
 
             if (domain::SummaryData *area_summary_data = this->getData(key))
             {
-                company_summary.areaCenter = "ALL";
-                company_summary.stockId = area_summary_data->stockId;
-                company_summary.belongBranches = areaBranchProvider_->getAllBranches();
-                company_summary.marginAvailableAmount += area_summary_data->marginAvailableAmount;
-                company_summary.marginAvailableQty += area_summary_data->marginAvailableQty;
-                company_summary.shortAvailableAmount += area_summary_data->shortAvailableAmount;
-                company_summary.shortAvailableQty += area_summary_data->shortAvailableQty;
-                company_summary.afterMarginAvailableAmount += area_summary_data->afterMarginAvailableAmount;
-                company_summary.afterMarginAvailableQty += area_summary_data->afterMarginAvailableQty;
-                company_summary.afterShortAvailableAmount += area_summary_data->afterShortAvailableAmount;
-                company_summary.afterShortAvailableQty += area_summary_data->afterShortAvailableQty;
+                company_summary.area_center = "ALL";
+                company_summary.stock_id = area_summary_data->stock_id;
+                company_summary.belong_branches = areaBranchProvider_->getAllBranches();
+                company_summary.margin_available_amount += area_summary_data->margin_available_amount;
+                company_summary.margin_available_qty += area_summary_data->margin_available_qty;
+                company_summary.short_available_amount += area_summary_data->short_available_amount;
+                company_summary.short_available_qty += area_summary_data->short_available_qty;
+                company_summary.after_margin_available_amount += area_summary_data->after_margin_available_amount;
+                company_summary.after_margin_available_qty += area_summary_data->after_margin_available_qty;
+                company_summary.after_short_available_amount += area_summary_data->after_short_available_amount;
+                company_summary.after_short_available_qty += area_summary_data->after_short_available_qty;
             }
         }
 
@@ -258,17 +258,17 @@ namespace finance::infrastructure::storage
         try
         {
             nlohmann::json j;
-            j["stock_id"] = data.stockId;
-            j["area_center"] = data.areaCenter;
-            j["margin_available_amount"] = data.marginAvailableAmount;
-            j["margin_available_qty"] = data.marginAvailableQty;
-            j["short_available_amount"] = data.shortAvailableAmount;
-            j["short_available_qty"] = data.shortAvailableQty;
-            j["after_margin_available_amount"] = data.afterMarginAvailableAmount;
-            j["after_margin_available_qty"] = data.afterMarginAvailableQty;
-            j["after_short_available_amount"] = data.afterShortAvailableAmount;
-            j["after_short_available_qty"] = data.afterShortAvailableQty;
-            j["belong_branches"] = data.belongBranches;
+            j["stock_id"] = data.stock_id;
+            j["area_center"] = data.area_center;
+            j["margin_available_amount"] = data.margin_available_amount;
+            j["margin_available_qty"] = data.margin_available_qty;
+            j["short_available_amount"] = data.short_available_amount;
+            j["short_available_qty"] = data.short_available_qty;
+            j["after_margin_available_amount"] = data.after_margin_available_amount;
+            j["after_margin_available_qty"] = data.after_margin_available_qty;
+            j["after_short_available_amount"] = data.after_short_available_amount;
+            j["after_short_available_qty"] = data.after_short_available_qty;
+            j["belong_branches"] = data.belong_branches;
             out_dump = j.dump();
             return domain::Status::ok()
                 .withOperation("serializeSummaryData")
@@ -286,17 +286,17 @@ namespace finance::infrastructure::storage
         try
         {
             auto j = nlohmann::json::parse(json);
-            out_data.stockId = j["stock_id"].get<std::string>();
-            out_data.areaCenter = j["area_center"].get<std::string>();
-            out_data.marginAvailableAmount = j["margin_available_amount"].get<double>();
-            out_data.marginAvailableQty = j["margin_available_qty"].get<int64_t>();
-            out_data.shortAvailableAmount = j["short_available_amount"].get<double>();
-            out_data.shortAvailableQty = j["short_available_qty"].get<int64_t>();
-            out_data.afterMarginAvailableAmount = j["after_margin_available_amount"].get<double>();
-            out_data.afterMarginAvailableQty = j["after_margin_available_qty"].get<int64_t>();
-            out_data.afterShortAvailableAmount = j["after_short_available_amount"].get<double>();
-            out_data.afterShortAvailableQty = j["after_short_available_qty"].get<int64_t>();
-            out_data.belongBranches = j["belong_branches"].get<std::vector<std::string>>();
+            out_data.stock_id = j["stock_id"].get<std::string>();
+            out_data.area_center = j["area_center"].get<std::string>();
+            out_data.margin_available_amount = j["margin_available_amount"].get<double>();
+            out_data.margin_available_qty = j["margin_available_qty"].get<int64_t>();
+            out_data.short_available_amount = j["short_available_amount"].get<double>();
+            out_data.short_available_qty = j["short_available_qty"].get<int64_t>();
+            out_data.after_margin_available_amount = j["after_margin_available_amount"].get<double>();
+            out_data.after_margin_available_qty = j["after_margin_available_qty"].get<int64_t>();
+            out_data.after_short_available_amount = j["after_short_available_amount"].get<double>();
+            out_data.after_short_available_qty = j["after_short_available_qty"].get<int64_t>();
+            out_data.belong_branches = j["belong_branches"].get<std::vector<std::string>>();
             return domain::Status::ok()
                 .withOperation("deserializeSummaryData")
                 .withRequest(json);

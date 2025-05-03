@@ -2,7 +2,7 @@
 
 #include <string>
 #include <string_view>
-#include "domain/FinanceDataStructure.h"
+#include "../../domain/FinanceDataStructure.h"
 #include <cctype>
 #include <cstring>
 #include <nlohmann/json.hpp>
@@ -114,11 +114,11 @@ namespace finance::utils
 
             if constexpr (std::is_same_v<T, domain::SummaryData>)
             {
-                return prefixKey + ":" + data.areaCenter + ":" + data.stockId;
+                return prefixKey + ":" + data.area_center + ":" + data.stock_id;
             }
             else if constexpr (std::is_same_v<T, domain::MessageDataHCRTM01>)
             {
-                return prefixKey + ":" + data.area_center + ":" + data.stockId;
+                return prefixKey + ":" + data.area_center + ":" + data.stock_id;
             }
             else if constexpr (std::is_same_v<T, std::string>)
             {
@@ -129,13 +129,6 @@ namespace finance::utils
                 static_assert(sizeof(T) == 0, "Unsupported type for generateKey");
                 return "";
             }
-        }
-
-        inline std::string buildRedisKey(const std::string &prefix_key, const std::string &data)
-        {
-            std::ostringstream oss;
-            oss << prefix_key << ":ALL:" << data;
-            return oss.str();
         }
     };
 } // namespace finance::utils

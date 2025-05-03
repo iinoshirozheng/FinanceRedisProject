@@ -1,20 +1,29 @@
 #pragma once
 
 #include <cstddef>
-#include <cstring>
-#include <algorithm>
+#include <cstdint>
+#include <atomic>
+#include <thread>  // std::this_thread::yield
+#include <cstring> // memchr
 #include <stdexcept>
+#include <cinttypes> // PRIu64
 #include <loguru.hpp>
-#include <vector>
 
 namespace finance::infrastructure::network
 {
-    constexpr size_t MEGA_BYTE = 1024 * 1024;
-    constexpr size_t MIN_BUFFER_CAPACITY = 8 * MEGA_BYTE;
-    constexpr size_t MAX_BUFFER_CAPACITY = 128 * MEGA_BYTE;
 
+    /**
+     * 單生產者單消費者（SPSC）環形緩衝區，編譯期固定容量 CAP（2 的冪次）。
+     * 完全無鎖（0lock）實現，使用自旋等待取代 mutex/condition_variable。
+     * 支援零拷貝多段讀寫、診斷日誌、版本號保護。
+     * C++17 相容。
+     */
+    template <size_t CAP>
     class RingBuffer
     {
+        static_assert(CAP > 0, "CAP 必須大於 0");
+        static_assert((CAP & (CAP - 1)) == 0, "CAP 必須是 2 的冪次");
+
     public:
         struct PacketRef
         {
@@ -22,251 +31,199 @@ namespace finance::infrastructure::network
             size_t length;
         };
 
-        explicit RingBuffer(size_t minCapacity = 1024, size_t maxCapacity = 1024 * 1024 * 1024)
-            : minCapacity_(minCapacity), maxCapacity_(maxCapacity)
+        RingBuffer() noexcept
+            : head_(0), tail_(0), clearGen_(0)
         {
-            if (minCapacity > maxCapacity)
-            {
-                throw std::invalid_argument("minCapacity cannot be greater than maxCapacity");
-            }
-            buffer_.resize(minCapacity);
+            LOG_F(INFO, "RingBuffer<%zu> constructed (0lock)", CAP);
         }
 
-        ~RingBuffer()
-        {
-            // No need to delete buffer_ as it's managed by std::vector
-        }
-
-        // Prevent copying
         RingBuffer(const RingBuffer &) = delete;
         RingBuffer &operator=(const RingBuffer &) = delete;
+        RingBuffer(RingBuffer &&) = default;
+        RingBuffer &operator=(RingBuffer &&) = default;
 
-        // Allow moving
-        RingBuffer(RingBuffer &&other) noexcept
-            : buffer_(other.buffer_), readPos_(other.readPos_), writePos_(other.writePos_),
-              minCapacity_(other.minCapacity_), maxCapacity_(other.maxCapacity_)
+        /// 取得版本號
+        uint64_t generation() const noexcept
         {
-            other.buffer_.clear();
-            other.readPos_ = 0;
-            other.writePos_ = 0;
-            other.minCapacity_ = 0;
-            other.maxCapacity_ = 0;
+            return clearGen_.load(std::memory_order_acquire);
         }
 
-        RingBuffer &operator=(RingBuffer &&other) noexcept
+        /// 環形緩衝區總容量
+        static constexpr size_t capacity() noexcept { return CAP; }
+
+        /// 是否為空
+        [[nodiscard]]
+        bool empty() const noexcept
         {
-            if (this != &other)
-            {
-                buffer_.clear();
-                minCapacity_ = other.minCapacity_;
-                maxCapacity_ = other.maxCapacity_;
-                readPos_ = other.readPos_;
-                writePos_ = other.writePos_;
-                other.minCapacity_ = 0;
-                other.maxCapacity_ = 0;
-                other.readPos_ = 0;
-                other.writePos_ = 0;
-            }
-            return *this;
+            return head_.load(std::memory_order_relaxed) == tail_.load(std::memory_order_relaxed);
         }
 
-        char *writablePtr(size_t *max_len)
+        /// 當前可讀字節數
+        [[nodiscard]]
+        size_t size() const noexcept
         {
-            if (max_len == nullptr)
-            {
-                return nullptr;
-            }
-
-            size_t available = writableSize();
-            if (available == 0)
-            {
-                *max_len = 0;
-                return nullptr;
-            }
-
-            *max_len = available;
-            return buffer_.data() + writePos_;
+            size_t h = head_.load(std::memory_order_relaxed);
+            size_t t = tail_.load(std::memory_order_relaxed);
+            return (t + CAP - h) & Mask;
         }
 
-        void advanceWrite(size_t len)
+        /// 取得可寫指標與最大可寫長度（不跨環界）
+        char *writablePtr(size_t &maxLen) noexcept
         {
-            if (len > writableSize())
-            {
-                throw std::runtime_error("Cannot advance write position beyond buffer capacity");
-            }
-            writePos_ = (writePos_ + len) % buffer_.size();
+            size_t h = head_.load(std::memory_order_acquire);
+            size_t t = tail_.load(std::memory_order_relaxed);
+            maxLen = (h + CAP - t - 1) & Mask;
+            return buffer_ + (t & Mask);
         }
 
-        bool findPacket(PacketRef &ref)
+        /**
+         * 將 n 字節資料入隊，使用者需先透過 writablePtr() 複製資料後呼叫。
+         * @throws std::overflow_error 可寫空間不足
+         */
+        void enqueue(size_t n)
         {
-            size_t available = readableSize();
-            if (available == 0)
+            size_t avail;
+            writablePtr(avail);
+            if (n > avail)
             {
+                LOG_F(ERROR,
+                      "enqueue overflow: need=%zu avail=%zu head=%zu tail=%zu gen=%" PRIu64,
+                      n, avail,
+                      head_.load(std::memory_order_relaxed),
+                      tail_.load(std::memory_order_relaxed),
+                      generation());
+                throw std::overflow_error("RingBuffer overflow on enqueue");
+            }
+            // 發佈寫入
+            tail_.store(tail_.load(std::memory_order_relaxed) + n,
+                        std::memory_order_release);
+        }
+
+        /// peek 第一段連續可讀資料（不跨環界）
+        std::pair<const char *, size_t> peekFirst(size_t &len) const noexcept
+        {
+            size_t h = head_.load(std::memory_order_relaxed);
+            size_t t = tail_.load(std::memory_order_acquire);
+            size_t total = (t + CAP - h) & Mask;
+            size_t idx = h & Mask;
+            len = std::min(total, CAP - idx);
+            return {buffer_ + idx, len};
+        }
+
+        /// peek 第二段資料（跨環界後部分）
+        std::pair<const char *, size_t> peekSecond(size_t firstLen) const noexcept
+        {
+            size_t h = head_.load(std::memory_order_relaxed);
+            size_t t = tail_.load(std::memory_order_acquire);
+            size_t total = (t + CAP - h) & Mask;
+            size_t idx = h & Mask;
+            size_t len1 = std::min(total, CAP - idx);
+            size_t wrap = (firstLen > len1 ? total : (total - len1));
+            return {buffer_, wrap};
+        }
+
+        /**
+         * 搜尋首個 '\n' 並填充 PacketRef；若無完整資料則回傳 false
+         */
+        bool findPacket(PacketRef &ref) const noexcept
+        {
+            size_t h = head_.load(std::memory_order_acquire);
+            size_t t = tail_.load(std::memory_order_acquire);
+            size_t total = (t + CAP - h) & Mask;
+            if (total == 0)
                 return false;
-            }
 
-            // Search for packet delimiter
-            size_t search_len = std::min(available, buffer_.size() - readPos_);
-            char *search_start = buffer_.data() + readPos_;
-            char *delimiter = static_cast<char *>(std::memchr(search_start, '\n', search_len));
-
-            if (delimiter == nullptr && search_len < available)
+            size_t idx = h & Mask;
+            size_t len1 = std::min(total, CAP - idx);
+            if (auto p = static_cast<const char *>(memchr(buffer_ + idx, '\n', len1)))
             {
-                // Check the remaining part of the buffer
-                search_len = available - search_len;
-                delimiter = static_cast<char *>(std::memchr(buffer_.data(), '\n', search_len));
+                ref.offset = h;
+                ref.length = (p - (buffer_ + idx)) + 1;
+                return true;
             }
-
-            if (delimiter == nullptr)
+            size_t wrap = total - len1;
+            if (auto q = static_cast<const char *>(memchr(buffer_, '\n', wrap)))
             {
-                return false;
+                ref.offset = h;
+                ref.length = len1 + (q - buffer_) + 1;
+                return true;
             }
-
-            ref.offset = readPos_;
-            ref.length = (delimiter - search_start) + 1; // Include the delimiter
-            return true;
+            return false;
         }
 
-        void consume(size_t len)
+        /**
+         * 將 n 字節資料出隊；失敗拋出 underflow_error。
+         */
+        void dequeue(size_t n)
         {
-            if (len > readableSize())
+            size_t h = head_.load(std::memory_order_relaxed);
+            size_t t = tail_.load(std::memory_order_acquire);
+            size_t avail = (t + CAP - h) & Mask;
+            if (n > avail)
             {
-                throw std::runtime_error("Cannot consume more data than available");
+                LOG_F(ERROR,
+                      "dequeue underflow: need=%zu avail=%zu head=%zu tail=%zu gen=%" PRIu64,
+                      n, avail, h, t, generation());
+                throw std::underflow_error("RingBuffer underflow on dequeue");
             }
-            readPos_ = (readPos_ + len) % buffer_.size();
+            // 發佈消費
+            head_.store((h + n) & Mask, std::memory_order_release);
         }
 
-        size_t size() const
+        /**
+         * 取得任意 offset 的資料指標（自動做環界運算）
+         */
+        char *getDataPtr(size_t &offset) noexcept
         {
-            if (writePos_ >= readPos_)
+            return buffer_ + (offset & Mask);
+        }
+
+        /// 清空緩衝區並增加版本號（不超過 UINT64_MAX）
+        void clear() noexcept
+        {
+            size_t t = tail_.load(std::memory_order_relaxed) & Mask;
+            head_.store(t, std::memory_order_release);
+            uint64_t old = clearGen_.load(std::memory_order_relaxed);
+            if (old < UINT64_MAX)
             {
-                return writePos_ - readPos_;
+                clearGen_.store(old + 1, std::memory_order_release);
             }
-            return buffer_.size() - (readPos_ - writePos_);
         }
 
-        size_t capacity() const
+        /**
+         * 自旋等待直到有資料
+         */
+        void waitForData() const noexcept
         {
-            return buffer_.size();
-        }
-
-        bool empty() const
-        {
-            return readPos_ == writePos_;
-        }
-
-        bool full() const
-        {
-            return size() == buffer_.size() - 1;
-        }
-
-        void clear()
-        {
-            readPos_ = 0;
-            writePos_ = 0;
-        }
-
-        const char *data() const
-        {
-            return buffer_.data();
-        }
-
-        inline bool resizeBuffer(size_t newCapacity)
-        {
-            if (newCapacity > MAX_BUFFER_CAPACITY)
+            while (empty())
             {
-                LOG_F(ERROR, "Attempted to resize buffer beyond maximum capacity (%zu MB)", static_cast<size_t>(MAX_BUFFER_CAPACITY / MEGA_BYTE));
-                return false;
+                std::this_thread::yield();
             }
-
-            if (newCapacity <= buffer_.size())
-            {
-                LOG_F(WARNING, "Resize skipped: new capacity (%zu) is not larger than current capacity (%zu)", newCapacity, buffer_.size());
-                return false;
-            }
-
-            buffer_.resize(newCapacity);
-            readPos_ = 0;
-            writePos_ = size();
-
-            LOG_F(INFO, "Buffer resized to capacity: %zu MB", newCapacity / MEGA_BYTE);
-            return true;
         }
 
-        inline bool shrinkBuffer(size_t newCapacity)
+        /**
+         * 自旋等待直到可寫空間 >= n
+         */
+        void waitForSpace(size_t n) const noexcept
         {
-            if (newCapacity < MIN_BUFFER_CAPACITY)
+            while (true)
             {
-                LOG_F(ERROR, "Attempted to shrink buffer below minimum capacity (%zu MB)", static_cast<size_t>(MIN_BUFFER_CAPACITY / MEGA_BYTE));
-                return false;
-            }
-
-            if (newCapacity < size())
-            {
-                LOG_F(ERROR, "Shrink failed: new capacity (%zu) cannot accommodate current data (%zu)", newCapacity, size());
-                return false;
-            }
-
-            if (newCapacity >= buffer_.size())
-            {
-                LOG_F(WARNING, "Shrink skipped: new capacity (%zu) is not smaller than current capacity (%zu)", newCapacity, buffer_.size());
-                return false;
-            }
-
-            buffer_.resize(newCapacity);
-            readPos_ = 0;
-            writePos_ = size();
-
-            LOG_F(INFO, "Buffer shrunk to capacity: %zu MB", newCapacity / MEGA_BYTE);
-            return true;
-        }
-
-        inline void adjustBufferSize(int MaxRate = 5, int MinRate = 5)
-        {
-            size_t currentSize = size();
-            size_t remainingSpace = writableSize();
-
-            // Expand if space is low
-            if (remainingSpace < currentSize / MaxRate)
-            {
-                size_t newCapacity = std::min(buffer_.size() * 2, static_cast<size_t>(MAX_BUFFER_CAPACITY));
-                resizeBuffer(newCapacity);
-                return;
-            }
-
-            // Shrink if utilization is low
-            if (currentSize < buffer_.size() / MinRate && buffer_.size() > MIN_BUFFER_CAPACITY)
-            {
-                size_t newCapacity = std::max(buffer_.size() / 2, static_cast<size_t>(MIN_BUFFER_CAPACITY));
-                shrinkBuffer(newCapacity);
-                return;
+                size_t h = head_.load(std::memory_order_acquire);
+                size_t t = tail_.load(std::memory_order_relaxed);
+                if (((h + CAP - t - 1) & Mask) >= n)
+                    break;
+                std::this_thread::yield();
             }
         }
 
     private:
-        size_t readableSize() const
-        {
-            if (writePos_ >= readPos_)
-            {
-                return writePos_ - readPos_;
-            }
-            return buffer_.size() - (readPos_ - writePos_);
-        }
+        static constexpr size_t Mask = CAP - 1;
+        static constexpr size_t CACHELINE_SIZE = 64;
 
-        size_t writableSize() const
-        {
-            if (readPos_ > writePos_)
-            {
-                return readPos_ - writePos_ - 1;
-            }
-            return buffer_.size() - writePos_ - (readPos_ == 0 ? 0 : 1);
-        }
-
-        std::vector<char> buffer_;
-        size_t readPos_{0};
-        size_t writePos_{0};
-        size_t minCapacity_;
-        size_t maxCapacity_;
+        alignas(CACHELINE_SIZE) char buffer_[CAP];
+        alignas(CACHELINE_SIZE) std::atomic<size_t> head_;
+        alignas(CACHELINE_SIZE) std::atomic<size_t> tail_;
+        std::atomic<uint64_t> clearGen_;
     };
 
 } // namespace finance::infrastructure::network

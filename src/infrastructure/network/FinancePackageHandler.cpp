@@ -43,36 +43,36 @@ namespace finance::infrastructure::network
 
             // Create summary data
             domain::SummaryData summary_data;
-            summary_data.stockId = utils::STR_VIEW(hcrtm01.stock_id);
-            summary_data.areaCenter = utils::STR_VIEW(hcrtm01.area_center);
-            summary_data.marginAvailableAmount = margin_available_amount;
-            summary_data.marginAvailableQty = margin_available_qty;
-            summary_data.shortAvailableAmount = short_available_amount;
-            summary_data.shortAvailableQty = short_available_qty;
-            summary_data.afterMarginAvailableAmount = after_margin_available_amount;
-            summary_data.afterMarginAvailableQty = after_margin_available_qty;
-            summary_data.afterShortAvailableAmount = after_short_available_amount;
-            summary_data.afterShortAvailableQty = after_short_available_qty;
+            summary_data.stock_id = utils::STR_VIEW(hcrtm01.stock_id);
+            summary_data.area_center = utils::STR_VIEW(hcrtm01.area_center);
+            summary_data.margin_available_amount = margin_available_amount;
+            summary_data.margin_available_qty = margin_available_qty;
+            summary_data.short_available_amount = short_available_amount;
+            summary_data.short_available_qty = short_available_qty;
+            summary_data.after_margin_available_amount = after_margin_available_amount;
+            summary_data.after_margin_available_qty = after_margin_available_qty;
+            summary_data.after_short_available_amount = after_short_available_amount;
+            summary_data.after_short_available_qty = after_short_available_qty;
 
             // Get belong branches from area branch provider
-            summary_data.belongBranches = areaBranchProvider_->getBranchesForArea(summary_data.areaCenter);
+            summary_data.belong_branches = areaBranchProvider_->getBranchesForArea(summary_data.area_center);
 
             // Save to repository
             if (!repository_->syncToRedis(summary_data).isOk())
             {
-                LOG_F(ERROR, "Failed to save summary data for stock: %s", summary_data.stockId.c_str());
+                LOG_F(ERROR, "Failed to save summary data for stock: %s", summary_data.stock_id.c_str());
                 return false;
             }
 
             // Update company summary
-            if (!repository_->updateCompanySummary(summary_data.stockId))
+            if (!repository_->updateCompanySummary(summary_data.stock_id))
             {
-                LOG_F(ERROR, "Failed to update company summary for stock: %s", summary_data.stockId.c_str());
+                LOG_F(ERROR, "Failed to update company summary for stock: %s", summary_data.stock_id.c_str());
                 return false;
             }
 
             LOG_F(INFO, "Processed HCRTM01 data for stock: %s, area: %s",
-                  summary_data.stockId.c_str(), summary_data.areaCenter.c_str());
+                  summary_data.stock_id.c_str(), summary_data.area_center.c_str());
             return true;
         }
         return false;
@@ -88,32 +88,32 @@ namespace finance::infrastructure::network
 
         // Create summary data
         domain::SummaryData summary_data;
-        summary_data.stockId = utils::STR_VIEW(hcrtm05p.stock_id);
-        summary_data.areaCenter = utils::STR_VIEW(hcrtm05p.broker_id);
-        summary_data.marginAvailableQty = margin_buy_offset_qty;
-        summary_data.shortAvailableQty = short_sell_offset_qty;
-        summary_data.afterMarginAvailableQty = margin_buy_offset_qty;
-        summary_data.afterShortAvailableQty = short_sell_offset_qty;
+        summary_data.stock_id = utils::STR_VIEW(hcrtm05p.stock_id);
+        summary_data.area_center = utils::STR_VIEW(hcrtm05p.broker_id);
+        summary_data.margin_available_qty = margin_buy_offset_qty;
+        summary_data.short_available_qty = short_sell_offset_qty;
+        summary_data.after_margin_available_qty = margin_buy_offset_qty;
+        summary_data.after_short_available_qty = short_sell_offset_qty;
 
         // Get belong branches from area branch provider
-        summary_data.belongBranches = areaBranchProvider_->getBranchesForArea(summary_data.areaCenter);
+        summary_data.belong_branches = areaBranchProvider_->getBranchesForArea(summary_data.area_center);
 
         // Save to repository
         if (!repository_->syncToRedis(summary_data).isOk())
         {
-            LOG_F(ERROR, "Failed to save summary data for stock: %s", summary_data.stockId.c_str());
+            LOG_F(ERROR, "Failed to save summary data for stock: %s", summary_data.stock_id.c_str());
             return false;
         }
 
         // Update company summary
-        if (!repository_->updateCompanySummary(summary_data.stockId))
+        if (!repository_->updateCompanySummary(summary_data.stock_id))
         {
-            LOG_F(ERROR, "Failed to update company summary for stock: %s", summary_data.stockId.c_str());
+            LOG_F(ERROR, "Failed to update company summary for stock: %s", summary_data.stock_id.c_str());
             return false;
         }
 
         LOG_F(INFO, "Processed HCRTM05P data for stock: %s, broker: %s",
-              summary_data.stockId.c_str(), summary_data.areaCenter.c_str());
+              summary_data.stock_id.c_str(), summary_data.area_center.c_str());
         return true;
     }
 
