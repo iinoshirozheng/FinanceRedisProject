@@ -40,7 +40,8 @@ namespace finance::domain
             DeserializationError,
             InitializationError,
             RuntimeError,
-            Unknown
+            Unknown,
+            ValidationError
         };
 
         /**
@@ -66,7 +67,7 @@ namespace finance::domain
          * @param msg 描述錯誤的訊息
          * @return 具有指定錯誤代碼和訊息的 Status 物件
          */
-        static Status error(Code c, std::string msg) { return Status(c, std::move(msg)); }
+        static Status error(Code c, const std::string &msg) { return Status(c, msg); }
 
         /**
          * @brief 設定此狀態的操作類型。
@@ -196,6 +197,8 @@ namespace finance::domain
                 return "InitializationError";
             case Code::RuntimeError:
                 return "RuntimeError";
+            case Code::ValidationError:
+                return "ValidationError";
             default:
                 return "Unknown";
             }

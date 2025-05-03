@@ -3,15 +3,14 @@
 #include "../../../lib/loguru/loguru.hpp"
 #include <chrono>
 #include <algorithm>
+#include <thread>
 
 namespace finance::infrastructure::network
 {
     using namespace std::chrono_literals;
 
     TcpServiceAdapter::TcpServiceAdapter(int port, std::shared_ptr<domain::IPackageHandler> handler)
-        : serverSocket_(Poco::Net::SocketAddress("0.0.0.0", port)),
-          handler_(std::move(handler)),
-          ringBuffer_(std::make_shared<RingBuffer>(RING_BUFFER_SIZE))
+        : serverSocket_(Poco::Net::SocketAddress("0.0.0.0", port)), handler_(std::move(handler)), running_(false), ringBuffer_(std::make_shared<RingBuffer>(RING_BUFFER_SIZE))
     {
         serverSocket_.setReuseAddress(true);
         serverSocket_.setReusePort(true);
@@ -28,8 +27,8 @@ namespace finance::infrastructure::network
             return false;
 
         running_ = true;
-        acceptThread_ = std::thread(&TcpServiceAdapter::acceptLoop, this);
-        processingThread_ = std::thread(&TcpServiceAdapter::processPackets, this);
+        acceptThread_ = std::thread(&TcpServiceAdapter::consumeLoop, this);
+        processingThread_ = std::thread(&TcpServiceAdapter::produceLoop, this);
         return true;
     }
 
@@ -51,9 +50,9 @@ namespace finance::infrastructure::network
         }
     }
 
-    void TcpServiceAdapter::processPackets()
+    void TcpServiceAdapter::consumeLoop()
     {
-        PacketRef ref;
+        RingBuffer::PacketRef ref;
         while (running_)
         {
             if (ringBuffer_->findPacket(ref))
@@ -70,7 +69,7 @@ namespace finance::infrastructure::network
         }
     }
 
-    void TcpServiceAdapter::acceptLoop()
+    void TcpServiceAdapter::produceLoop()
     {
         while (running_)
         {
@@ -91,24 +90,6 @@ namespace finance::infrastructure::network
         }
     }
 
-    bool TcpServiceAdapter::receiveData(Poco::Net::StreamSocket &socket, char *buffer, int length)
-    {
-        try
-        {
-            int received = socket.receiveBytes(buffer, length);
-            return received > 0;
-        }
-        catch (const Poco::TimeoutException &)
-        {
-            return true;
-        }
-        catch (const std::exception &ex)
-        {
-            LOG_F(ERROR, "Error receiving data: %s", ex.what());
-            return false;
-        }
-    }
-
     void TcpServiceAdapter::handleClient(Poco::Net::StreamSocket socket)
     {
         try
@@ -117,21 +98,33 @@ namespace finance::infrastructure::network
             {
                 size_t maxLen;
                 char *writePtr = ringBuffer_->writablePtr(&maxLen);
-                if (maxLen == 0)
+
+                size_t incomingDataSize = socket.available();
+
+                ringBuffer_->adjustBufferSize();
+
+                if (incomingDataSize > maxLen)
                 {
                     LOG_F(WARNING, "Ring buffer full, waiting...");
                     std::this_thread::sleep_for(std::chrono::milliseconds(RECEIVE_RETRY_MS));
                     continue;
                 }
 
-                int n = socket.receiveBytes(writePtr, static_cast<int>(maxLen));
-                if (n <= 0)
+                int msgSize = socket.receiveBytes(writePtr, static_cast<int>(maxLen));
+                if (msgSize <= 0)
                 {
                     LOG_F(INFO, "Client disconnected");
                     break;
                 }
 
-                ringBuffer_->advanceWrite(n);
+                if (msgSize == 2 || msgSize == 3) // 濾掉 heart beat
+                {
+                    LOG_F(INFO, "keep alive");
+                    continue;
+                }
+
+                // 移動 ptr
+                ringBuffer_->advanceWrite(msgSize);
             }
         }
         catch (const Poco::TimeoutException &)
@@ -147,4 +140,5 @@ namespace finance::infrastructure::network
             LOG_F(ERROR, "Error handling client: %s", ex.what());
         }
     }
+
 } // namespace finance::infrastructure::network

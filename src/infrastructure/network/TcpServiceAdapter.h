@@ -1,13 +1,13 @@
 #pragma once
 
-#include <Poco/Net/ServerSocket.h>
-#include <Poco/Net/StreamSocket.h>
 #include <memory>
 #include <thread>
 #include <atomic>
-#include "RingBuffer.h"
-#include "../../domain/FinanceDataStructure.h"
-#include "../../domain/IPacketHandler.h"
+#include <mutex>
+#include <condition_variable>
+#include <Poco/Net/ServerSocket.h>
+#include "RingBuffer.hpp"
+#include "../../domain/IPackageHandler.h"
 
 namespace finance::infrastructure::network
 {
@@ -16,7 +16,7 @@ namespace finance::infrastructure::network
     static constexpr int MAX_PACKET_SIZE = 4000;            // Maximum size of a single packet
     static constexpr int SOCKET_TIMEOUT_MS = 1000;          // Socket timeout in milliseconds
     static constexpr int RECEIVE_RETRY_MS = 10;             // Time to wait when buffer is full
-    static constexpr size_t RING_BUFFER_SIZE = 1024 * 1024; // 1MB ring buffer
+    static constexpr size_t RING_BUFFER_SIZE = 1024 * 1024; // 1MB buffer
 
     /**
      * 主要 TCP 服務適配器
@@ -33,7 +33,7 @@ namespace finance::infrastructure::network
          * @param port 要監聽的端口
          * @param packetHandler 金融票據的處理器
          */
-        explicit TcpServiceAdapter(int port, std::shared_ptr<domain::IPackageHandler> handler);
+        TcpServiceAdapter(int port, std::shared_ptr<domain::IPackageHandler> handler);
 
         /**
          * 析構函數
@@ -52,17 +52,16 @@ namespace finance::infrastructure::network
         void stop();
 
     private:
-        void acceptLoop();
+        void consumeLoop();
+        void produceLoop();
         void handleClient(Poco::Net::StreamSocket socket);
-        void processPackets();
-        bool receiveData(Poco::Net::StreamSocket &socket, char *buffer, int length);
 
         Poco::Net::ServerSocket serverSocket_;
         std::shared_ptr<domain::IPackageHandler> handler_;
-        std::atomic<bool> running_{false};
+        std::atomic<bool> running_;
+        std::shared_ptr<RingBuffer> ringBuffer_;
         std::thread acceptThread_;
         std::thread processingThread_;
-        std::shared_ptr<RingBuffer> ringBuffer_;
     };
 
 } // namespace finance::infrastructure::network

@@ -1,5 +1,4 @@
 #include "FinanceService.h"
-#include "utils/FinanceUtils.hpp"
 #include "../infrastructure/network/FinancePackageHandler.h"
 #include "../infrastructure/network/TcpServiceAdapter.h"
 #include "../infrastructure/config/ConnectionConfigProvider.hpp"
@@ -7,6 +6,7 @@
 #include <algorithm>
 #include <csignal>
 #include <loguru.hpp>
+#include <set>
 
 namespace finance::application
 {
@@ -15,7 +15,7 @@ namespace finance::application
 
     FinanceService::FinanceService(
         std::shared_ptr<domain::IPackageHandler> packetHandler,
-        std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository,
+        std::shared_ptr<infrastructure::storage::RedisSummaryAdapter> repository,
         std::shared_ptr<infrastructure::config::AreaBranchProvider> areaBranchProvider)
         : packetHandler_(std::move(packetHandler)), repository_(std::move(repository)), areaBranchProvider_(std::move(areaBranchProvider))
     {
@@ -25,21 +25,24 @@ namespace finance::application
     {
         try
         {
+            domain::Status status;
             // Load configuration
             auto configProvider = std::make_unique<infrastructure::config::ConnectionConfigProvider>(configPath);
             if (!configProvider->loadFromFile(configPath))
             {
-                return domain::Status::error(
+                status = domain::Status::error(
                     domain::Status::Code::InitializationError,
                     "Failed to load configuration file: " + configPath);
+                return status;
             }
 
             // Initialize area branch mapping
             if (!areaBranchProvider_->loadFromFile("area_branch.json"))
             {
-                return domain::Status::error(
+                status = domain::Status::error(
                     domain::Status::Code::InitializationError,
                     "Failed to load area-branch mapping");
+                return status;
             }
 
             // Create and start TCP service
@@ -50,12 +53,18 @@ namespace finance::application
 
             // Load all data from Redis
             LOG_F(INFO, "Loading data from Redis...");
-            auto allData = repository_->loadAll();
-            LOG_F(INFO, "Loaded %zu records from Redis", allData.size());
+            status = repository_->loadAllFromRedis();
+            if (!status.isOk())
+            {
+                LOG_F(ERROR, "%s", status.toString().c_str());
+                return status;
+            }
+
+            LOG_F(INFO, "Loaded all data from Redis");
 
             // Update company summaries for all stocks
-            std::set<std::string> processedStocks;
-            for (const auto &data : allData)
+            std::set<std::string, std::less<>> processedStocks;
+            for (const auto &[stockId, data] : repository_->getAllMapped())
             {
                 if (processedStocks.insert(data.stockId).second)
                 {

@@ -2,82 +2,44 @@
 
 #include <string>
 #include <vector>
-#include <map>
-#include "./FinanceDataStructure.h"
+#include "FinanceDataStructure.h"
 
 namespace finance::domain
 {
     // 金融數據儲存庫介面
-    // 處理儲存和檢索金融摘要數據
+    // 負責儲存和檢索金融摘要數據
     template <typename Data>
     class IFinanceRepository
     {
     public:
         /**
-         * @brief Virtual destructor
+         * @brief 虛擬解構函數
+         * @details 釋放資源，保證物件安全銷毀
          */
         virtual ~IFinanceRepository() = default;
 
         /**
-         * @brief Save a data entity
-         * @param data The data entity to save
-         * @return true if saved successfully, false otherwise
+         * @brief 儲存數據實體
+         * @param key 鍵值，用於標識數據實體
+         * @param data 要儲存的數據實體
+         * @return 若成功儲存返回 true，失敗返回 false
          */
-        virtual bool save(const Data &data) = 0;
+        virtual bool setData(const std::string &key, const Data &data) = 0;
 
         /**
-         * @brief Retrieve a data entity by key
-         * @param key The key to identify the entity
-         * @return The data entity if found, otherwise std::nullopt
+         * @brief 更新數據實體
+         * @param key 鍵值，用於標識數據實體
+         * @param data 要更新的數據實體
+         * @return 若成功更新返回 true，失敗返回 false
          */
-        virtual Data *get(const std::string &key) = 0;
+        virtual bool updateData(const std::string &key, const Data &data) = 0;
 
         /**
-         * @brief Update a data entity
-         * @param data The updated data entity
-         * @param key The key to identify the entity
-         * @return true if updated successfully, false otherwise
+         * @brief 刪除數據實體
+         * @param key 鍵值，用於標識要刪除的數據實體
+         * @return 若成功刪除返回 true，失敗返回 false
          */
-        virtual bool update(const std::string &key, const Data &data) = 0;
-
-        /**
-         * @brief Delete a data entity
-         * @param key The key to identify the entity
-         * @return true if deleted successfully, false otherwise
-         */
-        virtual bool remove(const std::string &key) = 0;
-
-        /**
-         * @brief Load all data entities
-         * @return Vector of all data entities
-         */
-        virtual std::vector<Data> loadAll() = 0;
-
-        /**
-         * @brief Retrieve all data as a key-value mapping
-         * @return A map of all data entities
-         */
-        virtual std::map<std::string, Data> getAllMapped() = 0;
-
-        /**
-         * @brief Retrieve all summarized data by a specific secondary key
-         * @param secondaryKey The secondary key (e.g., stock ID or area center)
-         * @return A vector of all data entities matching the secondary key
-         */
-        virtual std::vector<Data> getAllBySecondaryKey(const std::string &secondaryKey) = 0;
-
-        /**
-         * @brief Create a search index for efficient queries
-         * @return true if the index was created successfully, false otherwise
-         */
-        virtual bool createIndex() = 0;
-
-        /**
-         * @brief Update the company summary for a specific stock
-         * @param stockId The stock ID to update the summary for
-         * @return true if updated successfully, false otherwise
-         */
-        virtual bool updateCompanySummary(const std::string &stockId) = 0;
+        virtual bool removeData(const std::string &key) = 0;
     };
 
 } // namespace finance::domain

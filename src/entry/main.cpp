@@ -27,8 +27,7 @@ int main(int argc, char *argv[])
         }
 
         // Initialize area branch provider
-        auto areaBranchProvider = std::make_shared<infrastructure::config::AreaBranchProvider>(
-            configProvider->getRedisUrl());
+        auto areaBranchProvider = std::make_shared<infrastructure::config::AreaBranchProvider>();
         if (!areaBranchProvider->loadFromFile("area_branch.json"))
         {
             LOG_F(ERROR, "Failed to load area-branch mapping");

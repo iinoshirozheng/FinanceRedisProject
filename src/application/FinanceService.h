@@ -2,11 +2,12 @@
 
 #include "../domain/FinanceDataStructure.h"
 #include "../domain/IFinanceRepository.h"
-#include "../domain/IPacketHandler.h"
+#include "../domain/IPackageHandler.h"
 #include "../domain/Status.h"
 #include "../infrastructure/config/AreaBranchProvider.hpp"
 #include "../infrastructure/config/ConnectionConfigProvider.hpp"
 #include "../infrastructure/network/TcpServiceAdapter.h"
+#include "../infrastructure/storage/RedisSummaryAdapter.h"
 #include <memory>
 #include <string>
 #include <map>
@@ -24,7 +25,7 @@ namespace finance::application
     public:
         FinanceService(
             std::shared_ptr<domain::IPackageHandler> packetHandler,
-            std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository,
+            std::shared_ptr<infrastructure::storage::RedisSummaryAdapter> repository,
             std::shared_ptr<infrastructure::config::AreaBranchProvider> areaBranchProvider);
 
         // Initialize the service with configuration
@@ -47,7 +48,7 @@ namespace finance::application
 
     private:
         std::shared_ptr<domain::IPackageHandler> packetHandler_;
-        std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository_;
+        std::shared_ptr<infrastructure::storage::RedisSummaryAdapter> repository_;
         std::shared_ptr<infrastructure::config::AreaBranchProvider> areaBranchProvider_;
         std::unique_ptr<infrastructure::network::TcpServiceAdapter> tcpService_;
         std::atomic<int> signalStatus_{0};

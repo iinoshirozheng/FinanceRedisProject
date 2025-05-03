@@ -6,8 +6,9 @@
 #include <cctype>
 #include <cstring>
 #include <nlohmann/json.hpp>
+#include <sstream>
 
-namespace finance::common
+namespace finance::utils
 {
 #define VAL_SIZE(_DATA_) _DATA_, std::strlen(_DATA_)
 #define STR_VIEW(_STR_) FinanceUtils::trim_right_view(_STR_)
@@ -107,15 +108,21 @@ namespace finance::common
 
         // 通用模板函數，用於根據任意數據結構創建唯一鍵
         template <typename T>
-        static std::string generateKey(const T &data)
+        static std::string generateKey(std::string prefix_key, const T &data)
         {
+            std::string prefixKey = std::string(prefix_key);
+
             if constexpr (std::is_same_v<T, domain::SummaryData>)
             {
-                return "summary:" + data.areaCenter + ":" + data.stockId;
+                return prefixKey + ":" + data.areaCenter + ":" + data.stockId;
+            }
+            else if constexpr (std::is_same_v<T, domain::MessageDataHCRTM01>)
+            {
+                return prefixKey + ":" + data.area_center + ":" + data.stockId;
             }
             else if constexpr (std::is_same_v<T, std::string>)
             {
-                return data; // If it's already a string, return it as is
+                return prefix_key + ":ALL:" + data; // If it's already a string, return it as is
             }
             else
             {
@@ -123,5 +130,12 @@ namespace finance::common
                 return "";
             }
         }
+
+        inline std::string buildRedisKey(const std::string &prefix_key, const std::string &data)
+        {
+            std::ostringstream oss;
+            oss << prefix_key << ":ALL:" << data;
+            return oss.str();
+        }
     };
-} // namespace finance::common
+} // namespace finance::utils

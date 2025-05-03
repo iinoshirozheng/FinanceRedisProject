@@ -1,7 +1,7 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.15)
 
 # Project definition with proper versioning and language specification
-project(FinanceManager 
+project(FinanceSystem 
     VERSION 1.0.0 
     DESCRIPTION "Financial Management System"
     LANGUAGES CXX
@@ -83,6 +83,7 @@ add_library(finance_infrastructure STATIC
     src/infrastructure/network/FinancePackageHandler.cpp
     src/infrastructure/storage/RedisSummaryAdapter.cpp
     src/infrastructure/logging/LoguruLogger.cpp
+    src/infrastructure/config/AreaBranchProvider.cpp
 )
 
 target_include_directories(finance_infrastructure PUBLIC

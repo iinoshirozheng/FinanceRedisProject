@@ -22,27 +22,32 @@ namespace finance::infrastructure::storage
 
         ~RedisSummaryAdapter() override;
 
-        bool save(const domain::SummaryData &data) override;
-        domain::SummaryData *get(const std::string &key) override;
-        bool remove(const std::string &key) override;
-        std::vector<domain::SummaryData> loadAll() override;
-        std::map<std::string, domain::SummaryData> getAllMapped() override;
-        bool update(const std::string &key, const domain::SummaryData &data) override;
-        std::vector<domain::SummaryData> getAllBySecondaryKey(const std::string &secondaryKey) override;
-        bool createIndex() override;
-        bool updateCompanySummary(const std::string &stock_id) override;
+        // override
+        bool setData(const std::string &key, const domain::SummaryData &data) override;
+        domain::SummaryData *getData(const std::string &key);
+        bool updateData(const std::string &key, const domain::SummaryData &data) override;
+        bool removeData(const std::string &key) override;
+
+        // redis method
+        std::map<std::string, domain::SummaryData> &getAllMapped();
+        bool createRedisTableIndex();
+        bool updateCompanySummary(const std::string &stock_id);
+        domain::Status connectToRedis();
+        void disconnectToRedis();
+
+        domain::Status loadAllFromRedis();
+        domain::Status serializeSummaryData(const domain::SummaryData &data, std::string &out_dump);
+        domain::Status deserializeSummaryData(const std::string &json, domain::SummaryData &out_data) const;
+        domain::Status getSummaryDataFromRedis(const std::string &key, domain::SummaryData &data);
+        domain::Status syncToRedis(const domain::SummaryData &data);
+        domain::Status removeSummaryDataFromRedis(const std::string &key);
+        domain::Status findSummaryDataFromRedis(const std::string &key, domain::SummaryData &out_data);
 
     private:
-        static constexpr const char *KEY_PREFIX = "summary:";
+        const std::string KEY_PREFIX = "summary";
         std::shared_ptr<config::ConnectionConfigProvider> configProvider_;
         std::shared_ptr<config::AreaBranchProvider> areaBranchProvider_;
         redisContext *redisContext_ = nullptr;
         std::map<std::string, domain::SummaryData> summaryCache_;
-
-        domain::Status connect();
-        void disconnect();
-        bool find(const std::string &key, domain::SummaryData &data);
-        std::string serializeSummaryData(const domain::SummaryData &data) const;
-        domain::Status deserializeSummaryData(const std::string &json, domain::SummaryData &data) const;
     };
 } // namespace finance::infrastructure::storage

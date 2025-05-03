@@ -2,9 +2,10 @@
 #include <unordered_map>
 #include <memory>
 #include "../../domain/FinanceDataStructure.h"
-#include "../../domain/IPacketHandler.h"
+#include "../../domain/IPackageHandler.h"
 #include "../../domain/IFinanceRepository.h"
 #include "../../infrastructure/config/AreaBranchProvider.hpp"
+#include "../../infrastructure/storage/RedisSummaryAdapter.h"
 #include <iostream>
 #include <string_view>
 
@@ -15,14 +16,14 @@ namespace finance::infrastructure::network
     {
     public:
         explicit Hcrtm01Handler(
-            std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository,
+            std::shared_ptr<finance::infrastructure::storage::RedisSummaryAdapter> repository,
             std::shared_ptr<config::AreaBranchProvider> areaBranchProvider)
             : repository_(repository), areaBranchProvider_(areaBranchProvider) {}
 
         bool processData(const domain::ApData &ap_data) override;
 
     private:
-        std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository_;
+        std::shared_ptr<storage::RedisSummaryAdapter> repository_;
         std::shared_ptr<config::AreaBranchProvider> areaBranchProvider_;
     };
 
@@ -31,14 +32,14 @@ namespace finance::infrastructure::network
     {
     public:
         explicit Hcrtm05pHandler(
-            std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository,
+            std::shared_ptr<storage::RedisSummaryAdapter> repository,
             std::shared_ptr<config::AreaBranchProvider> areaBranchProvider)
             : repository_(repository), areaBranchProvider_(areaBranchProvider) {}
 
         bool processData(const domain::ApData &ap_data) override;
 
     private:
-        std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository_;
+        std::shared_ptr<storage::RedisSummaryAdapter> repository_;
         std::shared_ptr<config::AreaBranchProvider> areaBranchProvider_;
     };
 
@@ -46,7 +47,7 @@ namespace finance::infrastructure::network
     {
     public:
         PacketProcessorFactory(
-            std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository,
+            std::shared_ptr<storage::RedisSummaryAdapter> repository,
             std::shared_ptr<config::AreaBranchProvider> areaBranchProvider);
 
         PacketProcessorFactory(const PacketProcessorFactory &) = delete;
@@ -58,7 +59,7 @@ namespace finance::infrastructure::network
         domain::IPackageHandler *getProcessorHandler(const std::string_view &tcode);
 
         std::unordered_map<std::string_view, std::unique_ptr<domain::IPackageHandler>> handlers_;
-        std::shared_ptr<domain::IFinanceRepository<domain::SummaryData>> repository_;
+        std::shared_ptr<storage::RedisSummaryAdapter> repository_;
         std::shared_ptr<config::AreaBranchProvider> areaBranchProvider_;
     };
 
