@@ -1,8 +1,6 @@
 #include "../application/FinanceService.h"
 #include "../infrastructure/config/ConnectionConfigProvider.hpp"
 #include "../infrastructure/config/AreaBranchProvider.hpp"
-#include "../infrastructure/network/FinancePackageHandler.h"
-#include "../infrastructure/storage/RedisSummaryAdapter.h"
 #include <loguru.hpp>
 #include <memory>
 #include <string>
@@ -32,14 +30,8 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        // Initialize repository
-        auto repository = std::make_shared<infrastructure::storage::RedisSummaryAdapter>();
-
-        // Create packet handler factory
-        auto packetHandler = std::make_shared<infrastructure::network::PacketProcessorFactory>();
-
         // Create and initialize service
-        application::FinanceService service(packetHandler, repository);
+        application::FinanceService service;
         auto status = service.initialize("connection.json");
         if (!status.isOk())
         {

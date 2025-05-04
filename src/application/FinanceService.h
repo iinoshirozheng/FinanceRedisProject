@@ -8,10 +8,10 @@
 #include "../infrastructure/config/ConnectionConfigProvider.hpp"
 #include "../infrastructure/network/TcpServiceAdapter.h"
 #include "../infrastructure/storage/RedisSummaryAdapter.h"
+#include "../infrastructure/network/FinancePackageHandler.h"
 #include <memory>
 #include <string>
 #include <map>
-#include <mutex>
 #include <vector>
 #include <optional>
 #include <csignal>
@@ -23,9 +23,7 @@ namespace finance::application
     class FinanceService
     {
     public:
-        FinanceService(
-            std::shared_ptr<domain::IPackageHandler> packetHandler,
-            std::shared_ptr<infrastructure::storage::RedisSummaryAdapter> repository);
+        FinanceService() = default;
 
         // Initialize the service with configuration
         domain::Status initialize(const std::string &configPath);
@@ -37,9 +35,11 @@ namespace finance::application
         void shutdown();
 
     private:
-        std::shared_ptr<domain::IPackageHandler> packetHandler_;
-        std::shared_ptr<infrastructure::storage::RedisSummaryAdapter> repository_;
+        infrastructure::network::PacketProcessorFactory packetHandler_;
+        infrastructure::storage::RedisSummaryAdapter repository_;
         std::unique_ptr<infrastructure::network::TcpServiceAdapter> tcpService_;
         std::atomic<int> signalStatus_{0};
+        bool isInitialized_{false};
+        bool isRunning_{false};
     };
 } // namespace finance::application

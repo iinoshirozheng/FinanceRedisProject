@@ -9,6 +9,7 @@ namespace finance::infrastructure::storage
     const std::string RedisSummaryAdapter::KEY_PREFIX = "summary";
     redisContext *RedisSummaryAdapter::redisContext_ = nullptr;
     std::map<std::string, domain::SummaryData> RedisSummaryAdapter::summaryCache_;
+    std::mutex RedisSummaryAdapter::cacheMutex_;
 
     RedisSummaryAdapter::RedisSummaryAdapter()
     {
@@ -78,6 +79,7 @@ namespace finance::infrastructure::storage
 
     bool RedisSummaryAdapter::setData(const std::string &key, const domain::SummaryData &data)
     {
+        std::lock_guard<std::mutex> lock(cacheMutex_);
         auto result = summaryCache_.insert({key, data});
         if (!result.second)
         {
@@ -149,6 +151,7 @@ namespace finance::infrastructure::storage
 
     bool RedisSummaryAdapter::removeData(const std::string &key)
     {
+        std::lock_guard<std::mutex> lock(cacheMutex_);
         size_t removed = summaryCache_.erase(key);
 
         if (removed > 0)
@@ -197,7 +200,10 @@ namespace finance::infrastructure::storage
             freeReplyObject(reply); // 釋放 reply
 
             // 5. 清空緩存
-            summaryCache_.clear();
+            {
+                std::lock_guard<std::mutex> lock(cacheMutex_);
+                summaryCache_.clear();
+            }
 
             // 6. 加載每個鍵對應的數據
             for (const auto &key : keys)
@@ -207,6 +213,7 @@ namespace finance::infrastructure::storage
                 domain::Status status = findSummaryDataFromRedis(key, data);
                 LOG_F(INFO, "%s", status.toString().c_str());
 
+                std::lock_guard<std::mutex> lock(cacheMutex_);
                 summaryCache_[key] = data;
             }
 
@@ -229,6 +236,7 @@ namespace finance::infrastructure::storage
 
     std::map<std::string, domain::SummaryData> &RedisSummaryAdapter::getAllMapped()
     {
+        std::lock_guard<std::mutex> lock(cacheMutex_);
         return summaryCache_;
     }
 
@@ -359,6 +367,7 @@ namespace finance::infrastructure::storage
                 LOG_F(INFO, "%s", status.toString().c_str());
             }
 
+            std::lock_guard<std::mutex> lock(cacheMutex_);
             summaryCache_[out_key] = data;
             return status;
         }
@@ -407,6 +416,7 @@ namespace finance::infrastructure::storage
             }
 
             // Remove from cache
+            std::lock_guard<std::mutex> lock(cacheMutex_);
             summaryCache_.erase(key);
             return status;
         }
@@ -511,6 +521,7 @@ namespace finance::infrastructure::storage
 
     domain::SummaryData *RedisSummaryAdapter::getData(const std::string &key)
     {
+        std::lock_guard<std::mutex> lock(cacheMutex_);
         auto it = summaryCache_.find(key);
         if (it != summaryCache_.end())
         {

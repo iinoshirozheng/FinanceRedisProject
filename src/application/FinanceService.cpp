@@ -14,15 +14,15 @@ namespace finance::application
     // Static member for signal handling
     static FinanceService *g_service = nullptr;
 
-    FinanceService::FinanceService(
-        std::shared_ptr<domain::IPackageHandler> packetHandler,
-        std::shared_ptr<infrastructure::storage::RedisSummaryAdapter> repository)
-        : packetHandler_(std::move(packetHandler)), repository_(std::move(repository))
-    {
-    }
-
     domain::Status FinanceService::initialize(const std::string &configPath)
     {
+        if (isInitialized_)
+        {
+            return domain::Status::error(
+                domain::Status::Code::InitializationError,
+                "Service is already initialized");
+        }
+
         try
         {
             domain::Status status;
@@ -44,13 +44,22 @@ namespace finance::application
                 return status;
             }
 
+            // Initialize repository
+            if (!repository_.init())
+            {
+                status = domain::Status::error(
+                    domain::Status::Code::InitializationError,
+                    "Failed to initialize Redis repository");
+                return status;
+            }
+
             // Create and start TCP service
             LOG_F(INFO, "Starting TCP service on port %d", infrastructure::config::ConnectionConfigProvider::serverPort());
-            tcpService_ = std::make_unique<infrastructure::network::TcpServiceAdapter>(packetHandler_);
+            tcpService_ = std::make_unique<infrastructure::network::TcpServiceAdapter>(&packetHandler_);
 
             // Load all data from Redis
             LOG_F(INFO, "Loading data from Redis...");
-            status = repository_->loadAllFromRedis();
+            status = repository_.loadAllFromRedis();
             if (!status.isOk())
             {
                 LOG_F(ERROR, "%s", status.toString().c_str());
@@ -61,17 +70,18 @@ namespace finance::application
 
             // Update company summaries for all stocks
             std::set<std::string, std::less<>> processedStocks;
-            for (const auto &[stockId, data] : repository_->getAllMapped())
+            for (const auto &[stockId, data] : repository_.getAllMapped())
             {
                 if (processedStocks.insert(stockId).second)
                 {
-                    if (!repository_->updateCompanySummary(stockId))
+                    if (!repository_.updateCompanySummary(stockId))
                     {
                         LOG_F(WARNING, "Failed to update company summary for stock: %s", stockId.c_str());
                     }
                 }
             }
 
+            isInitialized_ = true;
             return domain::Status::ok();
         }
         catch (const std::exception &ex)
@@ -84,6 +94,20 @@ namespace finance::application
 
     domain::Status FinanceService::run()
     {
+        if (!isInitialized_)
+        {
+            return domain::Status::error(
+                domain::Status::Code::RuntimeError,
+                "Service is not initialized");
+        }
+
+        if (isRunning_)
+        {
+            return domain::Status::error(
+                domain::Status::Code::RuntimeError,
+                "Service is already running");
+        }
+
         try
         {
             if (!tcpService_->start())
@@ -102,6 +126,8 @@ namespace finance::application
                         {
                 if (g_service) g_service->signalStatus_ = signal; });
 
+            isRunning_ = true;
+
             // Main loop
             LOG_F(INFO, "Finance System running, press Ctrl+C to stop");
             while (signalStatus_ == 0)
@@ -113,6 +139,7 @@ namespace finance::application
         }
         catch (const std::exception &ex)
         {
+            isRunning_ = false;
             return domain::Status::error(
                 domain::Status::Code::RuntimeError,
                 std::string("Runtime error: ") + ex.what());
@@ -125,7 +152,8 @@ namespace finance::application
         {
             tcpService_->stop();
         }
+
+        isRunning_ = false;
         g_service = nullptr;
     }
-
 } // namespace finance::application

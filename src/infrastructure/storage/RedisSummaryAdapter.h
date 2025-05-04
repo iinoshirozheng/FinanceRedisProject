@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <mutex>
 
 namespace finance::infrastructure::storage
 {
@@ -34,6 +35,7 @@ namespace finance::infrastructure::storage
         static const std::string KEY_PREFIX;
         static redisContext *redisContext_;
         static std::map<std::string, domain::SummaryData> summaryCache_;
+        static std::mutex cacheMutex_;
 
         static domain::Status serializeSummaryData(const domain::SummaryData &data, std::string &out_json);
         static domain::Status deserializeSummaryData(const std::string &json, domain::SummaryData &out_data);
