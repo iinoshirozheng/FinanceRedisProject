@@ -31,11 +31,10 @@ int main(int argc, char *argv[])
         }
 
         // Create and initialize service
-        application::FinanceService service;
-        auto status = service.initialize("connection.json");
-        if (!status.isOk())
+        auto service = application::FinanceService();
+        if (!service.initialize().isOk())
         {
-            LOG_F(ERROR, "Failed to initialize service: %s", status.message().c_str());
+            LOG_F(ERROR, "Failed to initialize service");
             return 1;
         }
 

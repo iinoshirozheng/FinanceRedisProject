@@ -1,21 +1,10 @@
 #pragma once
 
-#include "../domain/FinanceDataStructure.h"
-#include "../domain/IFinanceRepository.h"
-#include "../domain/IPackageHandler.h"
 #include "../domain/Status.h"
-#include "../infrastructure/config/AreaBranchProvider.hpp"
-#include "../infrastructure/config/ConnectionConfigProvider.hpp"
 #include "../infrastructure/network/TcpServiceAdapter.h"
 #include "../infrastructure/storage/RedisSummaryAdapter.h"
 #include "../infrastructure/network/FinancePackageHandler.h"
 #include <memory>
-#include <string>
-#include <map>
-#include <vector>
-#include <optional>
-#include <csignal>
-#include <thread>
 #include <atomic>
 
 namespace finance::application
@@ -25,8 +14,8 @@ namespace finance::application
     public:
         FinanceService() = default;
 
-        // Initialize the service with configuration
-        domain::Status initialize(const std::string &configPath);
+        // Initialize the service with default configuration
+        domain::Status initialize();
 
         // Start the service main loop
         domain::Status run();

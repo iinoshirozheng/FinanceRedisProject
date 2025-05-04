@@ -14,7 +14,7 @@ namespace finance::application
     // Static member for signal handling
     static FinanceService *g_service = nullptr;
 
-    domain::Status FinanceService::initialize(const std::string &configPath)
+    domain::Status FinanceService::initialize()
     {
         if (isInitialized_)
         {
@@ -26,24 +26,6 @@ namespace finance::application
         try
         {
             domain::Status status;
-            // Load configuration
-            if (!infrastructure::config::ConnectionConfigProvider::loadFromFile(configPath))
-            {
-                status = domain::Status::error(
-                    domain::Status::Code::InitializationError,
-                    "Failed to load configuration file: " + configPath);
-                return status;
-            }
-
-            // Initialize area branch mapping
-            if (!infrastructure::config::AreaBranchProvider::loadFromFile("area_branch.json"))
-            {
-                status = domain::Status::error(
-                    domain::Status::Code::InitializationError,
-                    "Failed to load area-branch mapping");
-                return status;
-            }
-
             // Initialize repository
             if (!repository_.init())
             {
