@@ -6,6 +6,7 @@
 #include <Poco/Net/ServerSocket.h>
 #include "RingBuffer.hpp"
 #include "../../domain/IPackageHandler.h"
+#include "../config/ConnectionConfigProvider.hpp"
 
 namespace finance::infrastructure::network
 {
@@ -15,10 +16,16 @@ namespace finance::infrastructure::network
     class TcpServiceAdapter
     {
     public:
-        TcpServiceAdapter(int port,
-                          std::shared_ptr<domain::IPackageHandler> handler);
-        ~TcpServiceAdapter();
+        explicit TcpServiceAdapter(std::shared_ptr<domain::IPackageHandler> handler)
+            : serverSocket_{{"0.0.0.0", static_cast<unsigned short>(config::ConnectionConfigProvider::serverPort())}},
+              handler_(std::move(handler)),
+              ringBuffer_()
+        {
+            serverSocket_.setReuseAddress(true);
+            serverSocket_.setReusePort(true);
+        }
 
+        ~TcpServiceAdapter();
         bool start();
         void stop();
 
@@ -28,12 +35,9 @@ namespace finance::infrastructure::network
 
         Poco::Net::ServerSocket serverSocket_;
         std::shared_ptr<domain::IPackageHandler> handler_;
-        std::atomic<bool> running_{false};
-
-        // 改成直接成員，效能更好
         RingBuffer<RING_BUFFER_SIZE> ringBuffer_;
-
         std::thread acceptThread_;
         std::thread processingThread_;
+        std::atomic<bool> running_{false};
     };
 }

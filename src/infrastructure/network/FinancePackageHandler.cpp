@@ -55,17 +55,17 @@ namespace finance::infrastructure::network
             summary_data.after_short_available_qty = after_short_available_qty;
 
             // Get belong branches from area branch provider
-            summary_data.belong_branches = areaBranchProvider_->getBranchesForArea(summary_data.area_center);
+            summary_data.belong_branches = config::AreaBranchProvider::getBranchesForArea(summary_data.area_center);
 
             // Save to repository
-            if (!repository_->syncToRedis(summary_data).isOk())
+            if (!storage::RedisSummaryAdapter::syncToRedis(summary_data).isOk())
             {
                 LOG_F(ERROR, "Failed to save summary data for stock: %s", summary_data.stock_id.c_str());
                 return false;
             }
 
             // Update company summary
-            if (!repository_->updateCompanySummary(summary_data.stock_id))
+            if (!storage::RedisSummaryAdapter::updateCompanySummary(summary_data.stock_id))
             {
                 LOG_F(ERROR, "Failed to update company summary for stock: %s", summary_data.stock_id.c_str());
                 return false;
@@ -96,17 +96,17 @@ namespace finance::infrastructure::network
         summary_data.after_short_available_qty = short_sell_offset_qty;
 
         // Get belong branches from area branch provider
-        summary_data.belong_branches = areaBranchProvider_->getBranchesForArea(summary_data.area_center);
+        summary_data.belong_branches = config::AreaBranchProvider::getBranchesForArea(summary_data.area_center);
 
         // Save to repository
-        if (!repository_->syncToRedis(summary_data).isOk())
+        if (!storage::RedisSummaryAdapter::syncToRedis(summary_data).isOk())
         {
             LOG_F(ERROR, "Failed to save summary data for stock: %s", summary_data.stock_id.c_str());
             return false;
         }
 
         // Update company summary
-        if (!repository_->updateCompanySummary(summary_data.stock_id))
+        if (!storage::RedisSummaryAdapter::updateCompanySummary(summary_data.stock_id))
         {
             LOG_F(ERROR, "Failed to update company summary for stock: %s", summary_data.stock_id.c_str());
             return false;
@@ -117,13 +117,10 @@ namespace finance::infrastructure::network
         return true;
     }
 
-    PacketProcessorFactory::PacketProcessorFactory(
-        std::shared_ptr<storage::RedisSummaryAdapter> repository,
-        std::shared_ptr<config::AreaBranchProvider> areaBranchProvider)
-        : repository_(std::move(repository)), areaBranchProvider_(std::move(areaBranchProvider))
+    PacketProcessorFactory::PacketProcessorFactory()
     {
-        handlers_["ELD001"] = std::make_unique<Hcrtm01Handler>(repository_, areaBranchProvider_);
-        handlers_["ELD002"] = std::make_unique<Hcrtm05pHandler>(repository_, areaBranchProvider_);
+        handlers_["ELD001"] = std::make_unique<Hcrtm01Handler>();
+        handlers_["ELD002"] = std::make_unique<Hcrtm05pHandler>();
     }
 
     bool PacketProcessorFactory::processData(const domain::ApData &ap_data)
@@ -134,7 +131,6 @@ namespace finance::infrastructure::network
             return false;
         }
 
-        // Get the parent FinancePackageMessage
         auto parent = reinterpret_cast<const domain::FinancePackageMessage *>(
             reinterpret_cast<const char *>(&ap_data) - offsetof(domain::FinancePackageMessage, ap_data));
 

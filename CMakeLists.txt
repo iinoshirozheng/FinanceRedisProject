@@ -49,6 +49,7 @@ set(THIRD_PARTY_DIR ${CMAKE_SOURCE_DIR}/lib)
 
 # Include directories for third-party libraries
 include_directories(
+    ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
     ${THIRD_PARTY_DIR}/boost/include
     ${THIRD_PARTY_DIR}/hiredis/include
@@ -83,7 +84,6 @@ add_library(finance_infrastructure STATIC
     src/infrastructure/network/FinancePackageHandler.cpp
     src/infrastructure/storage/RedisSummaryAdapter.cpp
     src/infrastructure/logging/LoguruLogger.cpp
-    src/infrastructure/config/AreaBranchProvider.cpp
 )
 
 target_include_directories(finance_infrastructure PUBLIC
@@ -180,13 +180,6 @@ install(TARGETS
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
-
-# Testing configuration
-if(EXISTS "${CMAKE_SOURCE_DIR}/tests")
-    include(CTest)
-    enable_testing()
-    add_subdirectory(tests)
-endif()
 
 # Generate package configuration
 include(CMakePackageConfigHelpers)

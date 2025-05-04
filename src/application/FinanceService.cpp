@@ -2,6 +2,7 @@
 #include "../infrastructure/network/FinancePackageHandler.h"
 #include "../infrastructure/network/TcpServiceAdapter.h"
 #include "../infrastructure/config/ConnectionConfigProvider.hpp"
+#include "../infrastructure/config/AreaBranchProvider.hpp"
 #include <iostream>
 #include <algorithm>
 #include <csignal>
@@ -15,9 +16,8 @@ namespace finance::application
 
     FinanceService::FinanceService(
         std::shared_ptr<domain::IPackageHandler> packetHandler,
-        std::shared_ptr<infrastructure::storage::RedisSummaryAdapter> repository,
-        std::shared_ptr<infrastructure::config::AreaBranchProvider> areaBranchProvider)
-        : packetHandler_(std::move(packetHandler)), repository_(std::move(repository)), areaBranchProvider_(std::move(areaBranchProvider))
+        std::shared_ptr<infrastructure::storage::RedisSummaryAdapter> repository)
+        : packetHandler_(std::move(packetHandler)), repository_(std::move(repository))
     {
     }
 
@@ -27,8 +27,7 @@ namespace finance::application
         {
             domain::Status status;
             // Load configuration
-            auto configProvider = std::make_unique<infrastructure::config::ConnectionConfigProvider>(configPath);
-            if (!configProvider->loadFromFile(configPath))
+            if (!infrastructure::config::ConnectionConfigProvider::loadFromFile(configPath))
             {
                 status = domain::Status::error(
                     domain::Status::Code::InitializationError,
@@ -37,7 +36,7 @@ namespace finance::application
             }
 
             // Initialize area branch mapping
-            if (!areaBranchProvider_->loadFromFile("area_branch.json"))
+            if (!infrastructure::config::AreaBranchProvider::loadFromFile("area_branch.json"))
             {
                 status = domain::Status::error(
                     domain::Status::Code::InitializationError,
@@ -46,10 +45,8 @@ namespace finance::application
             }
 
             // Create and start TCP service
-            LOG_F(INFO, "Starting TCP service on port %d", configProvider->getServerPort());
-            tcpService_ = std::make_unique<infrastructure::network::TcpServiceAdapter>(
-                configProvider->getServerPort(),
-                packetHandler_);
+            LOG_F(INFO, "Starting TCP service on port %d", infrastructure::config::ConnectionConfigProvider::serverPort());
+            tcpService_ = std::make_unique<infrastructure::network::TcpServiceAdapter>(packetHandler_);
 
             // Load all data from Redis
             LOG_F(INFO, "Loading data from Redis...");
@@ -66,11 +63,11 @@ namespace finance::application
             std::set<std::string, std::less<>> processedStocks;
             for (const auto &[stockId, data] : repository_->getAllMapped())
             {
-                if (processedStocks.insert(data.stockId).second)
+                if (processedStocks.insert(stockId).second)
                 {
-                    if (!repository_->updateCompanySummary(data.stockId))
+                    if (!repository_->updateCompanySummary(stockId))
                     {
-                        LOG_F(WARNING, "Failed to update company summary for stock: %s", data.stockId.c_str());
+                        LOG_F(WARNING, "Failed to update company summary for stock: %s", stockId.c_str());
                     }
                 }
             }

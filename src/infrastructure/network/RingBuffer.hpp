@@ -8,9 +8,24 @@
 #include <stdexcept>
 #include <cinttypes> // PRIu64
 #include <loguru.hpp>
+#include <optional>
 
 namespace finance::infrastructure::network
 {
+
+    inline void cpu_pause() noexcept
+    {
+#if defined(__x86_64__) || defined(_M_X64)
+        // x86/x64 上的 PAUSE hint
+        __asm__ __volatile__("pause" ::: "memory");
+#elif defined(__aarch64__) || defined(__arm__)
+        // ARM 上的 YIELD hint (AArch64 & ARMv7+)
+        __asm__ __volatile__("yield" ::: "memory");
+#else
+        // 其他平台 fallback
+        std::this_thread::yield();
+#endif
+    }
 
     /**
      * 單生產者單消費者（SPSC）環形緩衝區，編譯期固定容量 CAP（2 的冪次）。
@@ -29,6 +44,16 @@ namespace finance::infrastructure::network
         {
             size_t offset;
             size_t length;
+        };
+
+        // 代表一個封包的兩段記憶體
+        struct PacketSeg
+        {
+            const char *ptr1;
+            size_t len1;
+            const char *ptr2;
+            size_t len2;
+            size_t totalLen() const noexcept { return len1 + len2; }
         };
 
         RingBuffer() noexcept
@@ -55,7 +80,8 @@ namespace finance::infrastructure::network
         [[nodiscard]]
         bool empty() const noexcept
         {
-            return head_.load(std::memory_order_relaxed) == tail_.load(std::memory_order_relaxed);
+            // 把 tail_ 也用 acquire，避免讀到過度陳舊的值
+            return head_.load(std::memory_order_relaxed) == tail_.load(std::memory_order_acquire);
         }
 
         /// 當前可讀字節數
@@ -63,17 +89,26 @@ namespace finance::infrastructure::network
         size_t size() const noexcept
         {
             size_t h = head_.load(std::memory_order_relaxed);
-            size_t t = tail_.load(std::memory_order_relaxed);
+            size_t t = tail_.load(std::memory_order_acquire);
             return (t + CAP - h) & Mask;
         }
 
         /// 取得可寫指標與最大可寫長度（不跨環界）
         char *writablePtr(size_t &maxLen) noexcept
         {
+            // 1) 先讀取消費者釋放的 head（需要 acquire）
             size_t h = head_.load(std::memory_order_acquire);
+            // 2) 再讀取自己的 tail（只自己寫自己讀，可 relaxed）
             size_t t = tail_.load(std::memory_order_relaxed);
-            maxLen = (h + CAP - t - 1) & Mask;
-            return buffer_ + (t & Mask);
+
+            // 3) 計算總可用空間
+            size_t totalFree = (h + CAP - t - 1) & Mask;
+            // 4) 計算第一段連續可寫長度，不跨界
+            size_t idx = t & Mask;
+            size_t first = CAP - idx;
+            maxLen = totalFree < first ? totalFree : first;
+
+            return buffer_ + idx;
         }
 
         /**
@@ -123,9 +158,9 @@ namespace finance::infrastructure::network
         }
 
         /**
-         * 搜尋首個 '\n' 並填充 PacketRef；若無完整資料則回傳 false
+         * 搜尋首個 '\n' 並填充 PacketRef，並回傳是否跨界
          */
-        bool findPacket(PacketRef &ref) const noexcept
+        bool findPacket(PacketRef &ref, bool &isCrossBoundary) const noexcept
         {
             size_t h = head_.load(std::memory_order_acquire);
             size_t t = tail_.load(std::memory_order_acquire);
@@ -135,20 +170,35 @@ namespace finance::infrastructure::network
 
             size_t idx = h & Mask;
             size_t len1 = std::min(total, CAP - idx);
-            if (auto p = static_cast<const char *>(memchr(buffer_ + idx, '\n', len1)))
+            // 在第一段尋找 '\n'
+            if (auto p = static_cast<const char *>(
+                    std::memchr(buffer_ + idx, '\n', len1)))
             {
                 ref.offset = h;
                 ref.length = (p - (buffer_ + idx)) + 1;
+                isCrossBoundary = false;
                 return true;
             }
+            // 在第二段尋找 '\n'
             size_t wrap = total - len1;
-            if (auto q = static_cast<const char *>(memchr(buffer_, '\n', wrap)))
+            if (auto q = static_cast<const char *>(
+                    std::memchr(buffer_, '\n', wrap)))
             {
                 ref.offset = h;
                 ref.length = len1 + (q - buffer_) + 1;
+                isCrossBoundary = true;
                 return true;
             }
             return false;
+        }
+
+        /**
+         * 搜尋首個 '\n' 並填充 PacketRef
+         */
+        bool findPacket(PacketRef &ref) const noexcept
+        {
+            bool dummy;
+            return findPacket(ref, dummy);
         }
 
         /**
@@ -183,11 +233,14 @@ namespace finance::infrastructure::network
         {
             size_t t = tail_.load(std::memory_order_relaxed) & Mask;
             head_.store(t, std::memory_order_release);
+
             uint64_t old = clearGen_.load(std::memory_order_relaxed);
-            if (old < UINT64_MAX)
+            uint64_t next = old + 1;
+            if (next == 0) // Overflow occurred
             {
-                clearGen_.store(old + 1, std::memory_order_release);
+                LOG_F(WARNING, "RingBuffer<%zu> version number overflow, wrapping around", CAP);
             }
+            clearGen_.store(next, std::memory_order_release);
         }
 
         /**
@@ -197,7 +250,7 @@ namespace finance::infrastructure::network
         {
             while (empty())
             {
-                std::this_thread::yield();
+                cpu_pause();
             }
         }
 
@@ -212,8 +265,44 @@ namespace finance::infrastructure::network
                 size_t t = tail_.load(std::memory_order_relaxed);
                 if (((h + CAP - t - 1) & Mask) >= n)
                     break;
-                std::this_thread::yield();
+                cpu_pause();
             }
+        }
+
+        /**
+         * 讀取完整封包的兩段連續記憶體區塊
+         * @return 若找到完整封包則回傳兩段區塊，否則回傳 nullopt
+         */
+        std::optional<PacketSeg> getNextPacket() const noexcept
+        {
+            // 1) 原子讀 head/tail
+            size_t h = head_.load(std::memory_order_acquire);
+            size_t t = tail_.load(std::memory_order_acquire);
+            size_t total = (t + CAP - h) & Mask;
+            if (total == 0)
+                return std::nullopt;
+
+            // 2) 計算第一段可讀起點與長度
+            size_t idx = h & Mask;
+            size_t len1 = std::min(total, CAP - idx);
+            const char *p1 = buffer_ + idx;
+
+            // 3) 在第一段找 '\n'
+            if (auto p = static_cast<const char *>(std::memchr(p1, '\n', len1)))
+            {
+                size_t packetLen = (p - p1) + 1;
+                return PacketSeg{p1, packetLen, nullptr, 0};
+            }
+
+            // 4) 在第二段找 '\n'
+            size_t wrap = total - len1;
+            if (auto q = static_cast<const char *>(std::memchr(buffer_, '\n', wrap)))
+            {
+                size_t packetLen = len1 + (q - buffer_) + 1;
+                return PacketSeg{p1, len1, buffer_, packetLen - len1};
+            }
+
+            return std::nullopt;
         }
 
     private:

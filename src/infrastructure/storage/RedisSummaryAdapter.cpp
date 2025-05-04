@@ -6,10 +6,11 @@
 
 namespace finance::infrastructure::storage
 {
-    RedisSummaryAdapter::RedisSummaryAdapter(
-        std::shared_ptr<config::ConnectionConfigProvider> configProvider,
-        std::shared_ptr<config::AreaBranchProvider> areaBranchProvider)
-        : configProvider_(std::move(configProvider)), areaBranchProvider_(std::move(areaBranchProvider))
+    const std::string RedisSummaryAdapter::KEY_PREFIX = "summary";
+    redisContext *RedisSummaryAdapter::redisContext_ = nullptr;
+    std::map<std::string, domain::SummaryData> RedisSummaryAdapter::summaryCache_;
+
+    RedisSummaryAdapter::RedisSummaryAdapter()
     {
         auto status = connectToRedis();
         if (!status.isOk())
@@ -23,6 +24,17 @@ namespace finance::infrastructure::storage
         disconnectToRedis();
     }
 
+    bool RedisSummaryAdapter::init()
+    {
+        auto status = connectToRedis();
+        if (!status.isOk())
+        {
+            LOG_F(ERROR, "%s", status.toString().c_str());
+            return false;
+        }
+        return true;
+    }
+
     domain::Status RedisSummaryAdapter::connectToRedis()
     {
         try
@@ -34,24 +46,24 @@ namespace finance::infrastructure::storage
                     .withResponse("Already connected");
             }
 
-            redisContext_ = redisConnect(configProvider_->getRedisUrl().c_str(), 6479);
+            redisContext_ = redisConnect(config::ConnectionConfigProvider::redisUrl().c_str(), 6479);
             if (!redisContext_ || redisContext_->err)
             {
                 std::string error = redisContext_ ? redisContext_->errstr : "Failed to allocate Redis context";
                 return domain::Status::error(domain::Status::Code::ConnectionError, error)
                     .withOperation("connect")
-                    .withRequest(configProvider_->getRedisUrl());
+                    .withRequest(config::ConnectionConfigProvider::redisUrl());
             }
 
             return domain::Status::ok()
                 .withOperation("connect")
-                .withRequest(configProvider_->getRedisUrl());
+                .withRequest(config::ConnectionConfigProvider::redisUrl());
         }
         catch (const std::exception &ex)
         {
             return domain::Status::error(domain::Status::Code::ConnectionError, ex.what())
                 .withOperation("connect")
-                .withRequest(configProvider_->getRedisUrl());
+                .withRequest(config::ConnectionConfigProvider::redisUrl());
         }
     }
 
@@ -66,13 +78,13 @@ namespace finance::infrastructure::storage
 
     bool RedisSummaryAdapter::setData(const std::string &key, const domain::SummaryData &data)
     {
-        auto result = summaryCache_.insert({key, data}); // 嘗試插入
+        auto result = summaryCache_.insert({key, data});
         if (!result.second)
-        {                              // 如果插入失敗（說明 key 已存在）
-            summaryCache_[key] = data; // 強制覆蓋（執行更新）
-            return true;               // 表示已更新數據
+        {
+            summaryCache_[key] = data;
+            return true;
         }
-        return false; // 表示插入了新數據
+        return false;
     }
 
     domain::Status RedisSummaryAdapter::getSummaryDataFromRedis(const std::string &key, domain::SummaryData &data)
@@ -227,17 +239,16 @@ namespace finance::infrastructure::storage
 
     bool RedisSummaryAdapter::updateCompanySummary(const std::string &stock_id)
     {
-        // Create aggregated summary
         domain::SummaryData company_summary;
-        for (const auto &backoffice_id : areaBranchProvider_->getBackofficeIds())
+        for (const auto &backoffice_id : config::AreaBranchProvider::getBackofficeIds())
         {
             std::string key = KEY_PREFIX + ":" + backoffice_id + ":" + stock_id;
 
-            if (domain::SummaryData *area_summary_data = this->getData(key))
+            if (domain::SummaryData *area_summary_data = getData(key))
             {
                 company_summary.area_center = "ALL";
                 company_summary.stock_id = area_summary_data->stock_id;
-                company_summary.belong_branches = areaBranchProvider_->getAllBranches();
+                company_summary.belong_branches = config::AreaBranchProvider::getAllBranches();
                 company_summary.margin_available_amount += area_summary_data->margin_available_amount;
                 company_summary.margin_available_qty += area_summary_data->margin_available_qty;
                 company_summary.short_available_amount += area_summary_data->short_available_amount;
@@ -249,7 +260,6 @@ namespace finance::infrastructure::storage
             }
         }
 
-        // sync to redis
         return syncToRedis(company_summary).isOk();
     }
 
@@ -281,7 +291,7 @@ namespace finance::infrastructure::storage
         }
     }
 
-    domain::Status RedisSummaryAdapter::deserializeSummaryData(const std::string &json, domain::SummaryData &out_data) const
+    domain::Status RedisSummaryAdapter::deserializeSummaryData(const std::string &json, domain::SummaryData &out_data)
     {
         try
         {
@@ -313,31 +323,29 @@ namespace finance::infrastructure::storage
     {
         try
         {
-            domain::Status status = connectToRedis();
-            if (!status.isOk())
+            if (!redisContext_)
             {
-                return status; // 如果無法連接，返回錯誤
+                return domain::Status::error(domain::Status::Code::ConnectionError, "Not connected to Redis");
             }
 
             std::string out_key = utils::FinanceUtils::generateKey(KEY_PREFIX, data);
-
             std::string out_json;
             serializeSummaryData(data, out_json);
 
             redisReply *reply = (redisReply *)redisCommand(redisContext_, "SET %s %s", out_key.c_str(), out_json.c_str());
             std::string response = reply ? reply->str : "redisReply == nullptr";
 
-            status = reply && reply->type != REDIS_REPLY_ERROR
-                         ? domain::Status::ok()
-                               .withOperation("save to redis")
-                               .withKey(out_key)
-                               .withRequest(out_json)
-                               .withResponse(response)
-                         : domain::Status::error(domain::Status::Code::RedisError, reply ? reply->str : "no reply")
-                               .withOperation("save to redis")
-                               .withKey(out_key)
-                               .withRequest(out_json)
-                               .withResponse(response);
+            domain::Status status = reply && reply->type != REDIS_REPLY_ERROR
+                                        ? domain::Status::ok()
+                                              .withOperation("save to redis")
+                                              .withKey(out_key)
+                                              .withRequest(out_json)
+                                              .withResponse(response)
+                                        : domain::Status::error(domain::Status::Code::RedisError, reply ? reply->str : "no reply")
+                                              .withOperation("save to redis")
+                                              .withKey(out_key)
+                                              .withRequest(out_json)
+                                              .withResponse(response);
 
             if (reply)
                 freeReplyObject(reply);
@@ -351,8 +359,7 @@ namespace finance::infrastructure::storage
                 LOG_F(INFO, "%s", status.toString().c_str());
             }
 
-            // Update cache
-            setData(out_key, data);
+            summaryCache_[out_key] = data;
             return status;
         }
         catch (const std::exception &ex)
@@ -415,10 +422,8 @@ namespace finance::infrastructure::storage
 
     domain::Status RedisSummaryAdapter::findSummaryDataFromRedis(const std::string &key, domain::SummaryData &out_data)
     {
-
         try
         {
-
             domain::Status status = connectToRedis();
             if (!status.isOk())
             {
@@ -457,11 +462,6 @@ namespace finance::infrastructure::storage
 
     bool RedisSummaryAdapter::createRedisTableIndex()
     {
-        if (!configProvider_->IsInitializeIndices())
-        {
-            return false;
-        }
-
         domain::Status status = connectToRedis();
         if (!status.isOk())
         {
@@ -511,14 +511,11 @@ namespace finance::infrastructure::storage
 
     domain::SummaryData *RedisSummaryAdapter::getData(const std::string &key)
     {
-        // Check cache first
         auto it = summaryCache_.find(key);
         if (it != summaryCache_.end())
         {
-            // 返回指向新物件的 unique_ptr
             return &it->second;
         }
-
         return nullptr;
     }
 } // namespace finance::infrastructure::storage

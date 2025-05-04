@@ -15,41 +15,22 @@ namespace finance::infrastructure::network
     class Hcrtm01Handler : public domain::IPackageHandler
     {
     public:
-        explicit Hcrtm01Handler(
-            std::shared_ptr<finance::infrastructure::storage::RedisSummaryAdapter> repository,
-            std::shared_ptr<config::AreaBranchProvider> areaBranchProvider)
-            : repository_(repository), areaBranchProvider_(areaBranchProvider) {}
-
+        Hcrtm01Handler() = default;
         bool processData(const domain::ApData &ap_data) override;
-
-    private:
-        std::shared_ptr<storage::RedisSummaryAdapter> repository_;
-        std::shared_ptr<config::AreaBranchProvider> areaBranchProvider_;
     };
 
     // HCRTM05P 封包的處理器
     class Hcrtm05pHandler : public domain::IPackageHandler
     {
     public:
-        explicit Hcrtm05pHandler(
-            std::shared_ptr<storage::RedisSummaryAdapter> repository,
-            std::shared_ptr<config::AreaBranchProvider> areaBranchProvider)
-            : repository_(repository), areaBranchProvider_(areaBranchProvider) {}
-
+        Hcrtm05pHandler() = default;
         bool processData(const domain::ApData &ap_data) override;
-
-    private:
-        std::shared_ptr<storage::RedisSummaryAdapter> repository_;
-        std::shared_ptr<config::AreaBranchProvider> areaBranchProvider_;
     };
 
     class PacketProcessorFactory : public domain::IPackageHandler
     {
     public:
-        PacketProcessorFactory(
-            std::shared_ptr<storage::RedisSummaryAdapter> repository,
-            std::shared_ptr<config::AreaBranchProvider> areaBranchProvider);
-
+        PacketProcessorFactory();
         PacketProcessorFactory(const PacketProcessorFactory &) = delete;
         PacketProcessorFactory &operator=(const PacketProcessorFactory &) = delete;
 
@@ -57,10 +38,9 @@ namespace finance::infrastructure::network
 
     private:
         domain::IPackageHandler *getProcessorHandler(const std::string_view &tcode);
+        void initializeHandlers();
 
         std::unordered_map<std::string_view, std::unique_ptr<domain::IPackageHandler>> handlers_;
-        std::shared_ptr<storage::RedisSummaryAdapter> repository_;
-        std::shared_ptr<config::AreaBranchProvider> areaBranchProvider_;
     };
 
 } // namespace finance::infrastructure::network

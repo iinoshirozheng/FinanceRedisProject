@@ -2,7 +2,7 @@
 
 #include <string>
 #include <string_view>
-#include "../../domain/FinanceDataStructure.h"
+#include "domain/FinanceDataStructure.h"
 #include <cctype>
 #include <cstring>
 #include <nlohmann/json.hpp>
@@ -107,28 +107,9 @@ namespace finance::utils
         }
 
         // 通用模板函數，用於根據任意數據結構創建唯一鍵
-        template <typename T>
-        static std::string generateKey(std::string prefix_key, const T &data)
+        static std::string generateKey(const std::string &prefix, const domain::SummaryData &data)
         {
-            std::string prefixKey = std::string(prefix_key);
-
-            if constexpr (std::is_same_v<T, domain::SummaryData>)
-            {
-                return prefixKey + ":" + data.area_center + ":" + data.stock_id;
-            }
-            else if constexpr (std::is_same_v<T, domain::MessageDataHCRTM01>)
-            {
-                return prefixKey + ":" + data.area_center + ":" + data.stock_id;
-            }
-            else if constexpr (std::is_same_v<T, std::string>)
-            {
-                return prefix_key + ":ALL:" + data; // If it's already a string, return it as is
-            }
-            else
-            {
-                static_assert(sizeof(T) == 0, "Unsupported type for generateKey");
-                return "";
-            }
+            return prefix + ":" + data.area_center + ":" + data.stock_id;
         }
     };
 } // namespace finance::utils

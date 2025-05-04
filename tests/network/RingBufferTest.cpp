@@ -10,6 +10,9 @@
 #include <mutex>
 #include <iomanip>
 #include <condition_variable>
+#include <cstring>
+#include <cstdlib>
+#include <ctime>
 
 using namespace finance::infrastructure::network;
 using namespace finance::domain;
@@ -17,17 +20,24 @@ using namespace finance::domain;
 class RingBufferTest : public ::testing::Test
 {
 protected:
-    static constexpr size_t BUFFER_SIZE = 10 * 1024 * 1024; // 10MB
-    RingBuffer buffer{BUFFER_SIZE};
+    static constexpr size_t BUFFER_SIZE = 16 * 1024 * 1024; // 16MB
+    RingBuffer<BUFFER_SIZE> buffer;
 
     void SetUp() override
     {
+        srand(time(nullptr));
         std::cout << "\n=== Test Case: " << testing::UnitTest::GetInstance()->current_test_info()->name() << " ===\n";
     }
 
     void TearDown() override
     {
         std::cout << "=== Test Complete ===\n\n";
+    }
+
+    void generateRandomHcrtm01(MessageDataHCRTM01 &hcrtm01)
+    {
+        snprintf(hcrtm01.margin_amount, sizeof(hcrtm01.margin_amount) - 1, "%011d", 1000000 + rand() % 9000000);
+        snprintf(hcrtm01.margin_qty, sizeof(hcrtm01.margin_qty) - 1, "%06d", 100 + rand() % 900);
     }
 
     // 生成隨機的 HCRTM01 消息
@@ -72,15 +82,15 @@ TEST_F(RingBufferTest, BasicWriteAndReadFinancePackage)
     char *write_ptr = buffer.writablePtr(&max_len);
     ASSERT_GE(max_len, len);
     memcpy(write_ptr, packet, len);
-    buffer.advanceWrite(len);
+    buffer.enqueue(len);
 
     // 查找並驗證數據包
-    RingBuffer::PacketRef ref;
-    ASSERT_TRUE(buffer.findPacket(ref));
-    ASSERT_EQ(ref.length, len);
+    size_t read_len;
+    auto [read_ptr, read_len] = buffer.peekFirst(read_len);
+    ASSERT_EQ(read_len, len);
 
     // 驗證數據內容
-    const FinancePackageMessage *received = reinterpret_cast<const FinancePackageMessage *>(buffer.data() + ref.offset);
+    const FinancePackageMessage *received = reinterpret_cast<const FinancePackageMessage *>(read_ptr);
     ASSERT_EQ(memcmp(received->p_code, "0200", 4), 0);
     ASSERT_EQ(memcmp(received->t_code, "ELD001", 6), 0);
     ASSERT_EQ(memcmp(received->srcid, "CB", 2), 0);
@@ -89,6 +99,9 @@ TEST_F(RingBufferTest, BasicWriteAndReadFinancePackage)
     std::cout << "p_code: " << received->p_code << "\n";
     std::cout << "t_code: " << received->t_code << "\n";
     std::cout << "srcid: " << received->srcid << "\n";
+
+    // Dequeue the packet
+    buffer.dequeue(read_len);
 }
 
 // 測試多個 HCRTM01 消息的寫入和讀取
@@ -121,7 +134,7 @@ TEST_F(RingBufferTest, MultipleHCRTM01Messages)
         char *write_ptr = buffer.writablePtr(&max_len);
         ASSERT_GE(max_len, sizeof(packet));
         memcpy(write_ptr, packet, sizeof(packet));
-        buffer.advanceWrite(sizeof(packet));
+        buffer.enqueue(sizeof(packet));
 
         std::cout << "Written message " << i + 1 << " with stock_id: " << hcrtm01.stock_id << "\n";
     }
@@ -129,10 +142,10 @@ TEST_F(RingBufferTest, MultipleHCRTM01Messages)
     // 讀取和驗證所有消息
     for (int i = 0; i < NUM_MESSAGES; ++i)
     {
-        RingBuffer::PacketRef ref;
-        ASSERT_TRUE(buffer.findPacket(ref));
+        size_t read_len;
+        auto [read_ptr, read_len] = buffer.peekFirst(read_len);
 
-        const FinancePackageMessage *received = reinterpret_cast<const FinancePackageMessage *>(buffer.data() + ref.offset);
+        const FinancePackageMessage *received = reinterpret_cast<const FinancePackageMessage *>(read_ptr);
         const auto &original_hcrtm01 = messages[i].ap_data.data.hcrtm01;
         const auto &received_hcrtm01 = received->ap_data.data.hcrtm01;
 
@@ -141,7 +154,7 @@ TEST_F(RingBufferTest, MultipleHCRTM01Messages)
 
         std::cout << "Verified message " << i + 1 << " with stock_id: " << received_hcrtm01.stock_id << "\n";
 
-        buffer.consume(ref.length);
+        buffer.dequeue(read_len);
     }
 }
 
@@ -170,7 +183,7 @@ TEST_F(RingBufferTest, BufferCapacityAndPerformance)
         char *write_ptr = buffer.writablePtr(&max_len);
         ASSERT_GE(max_len, sizeof(packet));
         memcpy(write_ptr, packet, sizeof(packet));
-        buffer.advanceWrite(sizeof(packet));
+        buffer.enqueue(sizeof(packet));
         total_bytes += sizeof(packet);
     }
 
@@ -178,10 +191,11 @@ TEST_F(RingBufferTest, BufferCapacityAndPerformance)
     int read_count = 0;
     while (read_count < NUM_MESSAGES)
     {
-        RingBuffer::PacketRef ref;
-        if (buffer.findPacket(ref))
+        size_t read_len;
+        auto [read_ptr, read_len] = buffer.peekFirst(read_len);
+        if (read_len > 0)
         {
-            buffer.consume(ref.length);
+            buffer.dequeue(read_len);
             read_count++;
         }
     }
@@ -223,7 +237,7 @@ TEST_F(RingBufferTest, ConcurrentFinancePackages)
             char* write_ptr = buffer.writablePtr(&max_len);
             if (max_len >= sizeof(packet)) {
                 memcpy(write_ptr, packet, sizeof(packet));
-                buffer.advanceWrite(sizeof(packet));
+                buffer.enqueue(sizeof(packet));
                 write_count++;
                 
                 if (write_count % 100 == 0) {
@@ -238,11 +252,12 @@ TEST_F(RingBufferTest, ConcurrentFinancePackages)
                        {
         while (!should_stop && read_count < NUM_MESSAGES)
         {
-            RingBuffer::PacketRef ref;
-            if (buffer.findPacket(ref))
+            size_t read_len;
+            auto [read_ptr, read_len] = buffer.peekFirst(read_len);
+            if (read_len > 0)
             {
-                const FinancePackageMessage* msg = reinterpret_cast<const FinancePackageMessage*>(buffer.data() + ref.offset);
-                buffer.consume(ref.length);
+                const FinancePackageMessage* msg = reinterpret_cast<const FinancePackageMessage*>(read_ptr);
+                buffer.dequeue(read_len);
                 read_count++;
             }
             else
@@ -342,7 +357,7 @@ TEST_F(RingBufferTest, StressTestPacketProcessing)
             if (max_len >= sizeof(packet))
             {
                 std::memcpy(write_ptr, packet, sizeof(packet));
-                buffer.advanceWrite(sizeof(packet));
+                buffer.enqueue(sizeof(packet));
                 messages_written++;
 
                 if (messages_written % 100 == 0)
@@ -373,10 +388,11 @@ TEST_F(RingBufferTest, StressTestPacketProcessing)
 
         while (!should_stop && messages_processed < MESSAGES_PER_PRODUCER)
         {
-            RingBuffer::PacketRef ref;
-            if (buffer.findPacket(ref))
+            size_t read_len;
+            auto [read_ptr, read_len] = buffer.peekFirst(read_len);
+            if (read_len > 0)
             {
-                const FinancePackageMessage *msg = reinterpret_cast<const FinancePackageMessage *>(buffer.data() + ref.offset);
+                const FinancePackageMessage *msg = reinterpret_cast<const FinancePackageMessage *>(read_ptr);
 
                 // Validate message format with exact comparisons
                 bool is_valid = true;
@@ -402,7 +418,7 @@ TEST_F(RingBufferTest, StressTestPacketProcessing)
                 {
                     std::lock_guard<std::mutex> lock(cout_mutex);
                     std::cout << "Invalid message detected by consumer " << consumer_id
-                              << " at offset " << ref.offset << "\n"
+                              << " at offset " << read_ptr << "\n"
                               << "p_code: [" << std::string_view(msg->p_code, 4) << "]\n"
                               << "t_code: [" << std::string_view(msg->t_code, 6) << "]\n"
                               << "srcid: [" << std::string_view(msg->srcid, 2) << "]\n"
@@ -412,7 +428,7 @@ TEST_F(RingBufferTest, StressTestPacketProcessing)
                     total_errors.fetch_add(1, std::memory_order_relaxed);
                 }
 
-                buffer.consume(ref.length);
+                buffer.dequeue(read_len);
 
                 if (is_valid)
                 {
@@ -546,7 +562,7 @@ TEST_F(RingBufferTest, BufferOverflowHandling)
         if (max_len >= sizeof(packet))
         {
             memcpy(write_ptr, packet, sizeof(packet));
-            buffer.advanceWrite(sizeof(packet));
+            buffer.enqueue(sizeof(packet));
         }
         else
         {
@@ -563,6 +579,139 @@ TEST_F(RingBufferTest, BufferOverflowHandling)
     std::cout << "Overflow rate: " << (overflow_count * 100.0 / NUM_MESSAGES) << "%\n";
 
     // 驗證緩衝區仍然可以正常工作
-    RingBuffer::PacketRef ref;
-    ASSERT_TRUE(buffer.findPacket(ref));
+    size_t read_len;
+    auto [read_ptr, read_len] = buffer.peekFirst(read_len);
+    ASSERT_TRUE(read_len > 0);
+}
+
+TEST_F(RingBufferTest, SinglePacketTest)
+{
+    // Create a test packet
+    FinancePackageMessage msg;
+    msg.header.length = sizeof(FinancePackageMessage);
+    msg.header.tcode = "HCRTM01";
+    msg.header.seq = 1;
+
+    // Generate random data
+    generateRandomHcrtm01(msg.data.hcrtm01);
+
+    // Write to buffer
+    size_t max_len;
+    char *write_ptr = buffer.writablePtr(max_len);
+    ASSERT_GE(max_len, sizeof(FinancePackageMessage));
+    memcpy(write_ptr, &msg, sizeof(FinancePackageMessage));
+    buffer.enqueue(sizeof(FinancePackageMessage));
+
+    // Read from buffer
+    size_t len;
+    auto [read_ptr, read_len] = buffer.peekFirst(len);
+    ASSERT_EQ(read_len, sizeof(FinancePackageMessage));
+
+    // Verify data
+    const FinancePackageMessage *received = reinterpret_cast<const FinancePackageMessage *>(read_ptr);
+    ASSERT_EQ(received->header.length, msg.header.length);
+    ASSERT_EQ(received->header.seq, msg.header.seq);
+    ASSERT_EQ(std::string(received->header.tcode), std::string(msg.header.tcode));
+    ASSERT_EQ(std::string(received->data.hcrtm01.margin_amount), std::string(msg.data.hcrtm01.margin_amount));
+    ASSERT_EQ(std::string(received->data.hcrtm01.margin_qty), std::string(msg.data.hcrtm01.margin_qty));
+
+    // Dequeue the packet
+    buffer.dequeue(sizeof(FinancePackageMessage));
+}
+
+TEST_F(RingBufferTest, MultiplePacketsTest)
+{
+    const int NUM_PACKETS = 100;
+    std::vector<FinancePackageMessage> messages(NUM_PACKETS);
+
+    // Write multiple packets
+    for (int i = 0; i < NUM_PACKETS; ++i)
+    {
+        auto &msg = messages[i];
+        msg.header.length = sizeof(FinancePackageMessage);
+        msg.header.tcode = "HCRTM01";
+        msg.header.seq = i + 1;
+
+        // Generate random data
+        snprintf(msg.data.hcrtm01.margin_amount, sizeof(msg.data.hcrtm01.margin_amount) - 1, "%011d", 1000000 + i);
+        snprintf(msg.data.hcrtm01.margin_qty, sizeof(msg.data.hcrtm01.margin_qty) - 1, "%06d", 100 + i);
+
+        size_t max_len;
+        char *write_ptr = buffer.writablePtr(max_len);
+        ASSERT_GE(max_len, sizeof(FinancePackageMessage));
+        memcpy(write_ptr, &msg, sizeof(FinancePackageMessage));
+        buffer.enqueue(sizeof(FinancePackageMessage));
+    }
+
+    // Read and verify all packets
+    for (int i = 0; i < NUM_PACKETS; ++i)
+    {
+        size_t len;
+        auto [read_ptr, read_len] = buffer.peekFirst(len);
+        ASSERT_EQ(read_len, sizeof(FinancePackageMessage));
+
+        const FinancePackageMessage *received = reinterpret_cast<const FinancePackageMessage *>(read_ptr);
+        ASSERT_EQ(received->header.length, messages[i].header.length);
+        ASSERT_EQ(received->header.seq, messages[i].header.seq);
+        ASSERT_EQ(std::string(received->header.tcode), std::string(messages[i].header.tcode));
+        ASSERT_EQ(std::string(received->data.hcrtm01.margin_amount), std::string(messages[i].data.hcrtm01.margin_amount));
+        ASSERT_EQ(std::string(received->data.hcrtm01.margin_qty), std::string(messages[i].data.hcrtm01.margin_qty));
+
+        buffer.dequeue(sizeof(FinancePackageMessage));
+    }
+}
+
+TEST_F(RingBufferTest, WrapAroundTest)
+{
+    const int NUM_PACKETS = 1000;
+    const int PACKET_SIZE = sizeof(FinancePackageMessage);
+
+    // Fill buffer multiple times to force wrap-around
+    for (int round = 0; round < 3; ++round)
+    {
+        // Write packets until buffer is almost full
+        for (int i = 0; i < NUM_PACKETS; ++i)
+        {
+            FinancePackageMessage msg;
+            msg.header.length = PACKET_SIZE;
+            msg.header.tcode = "HCRTM01";
+            msg.header.seq = i + 1;
+
+            // Generate random data
+            generateRandomHcrtm01(msg.data.hcrtm01);
+
+            size_t max_len;
+            char *write_ptr = buffer.writablePtr(max_len);
+            if (max_len >= PACKET_SIZE)
+            {
+                memcpy(write_ptr, &msg, PACKET_SIZE);
+                buffer.enqueue(PACKET_SIZE);
+            }
+            else
+            {
+                // Buffer is full, start consuming
+                size_t len;
+                auto [read_ptr, read_len] = buffer.peekFirst(len);
+                if (read_len > 0)
+                {
+                    buffer.dequeue(read_len);
+                }
+            }
+        }
+
+        // Consume all packets
+        while (true)
+        {
+            size_t len;
+            auto [read_ptr, read_len] = buffer.peekFirst(len);
+            if (read_len == 0)
+            {
+                break;
+            }
+
+            const FinancePackageMessage *msg = reinterpret_cast<const FinancePackageMessage *>(read_ptr);
+            ASSERT_EQ(msg->header.length, PACKET_SIZE);
+            buffer.dequeue(read_len);
+        }
+    }
 }

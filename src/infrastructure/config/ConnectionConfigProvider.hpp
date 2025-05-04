@@ -1,111 +1,85 @@
 #pragma once
 
-#include "./JsonProviderBase.hpp"
-#include "loguru.hpp"
 #include <string>
+#include <fstream>
+#include <nlohmann/json.hpp>
+#include <loguru.hpp>
 
 namespace finance::infrastructure::config
 {
 
-    /**
-     * ConnectionConfigProvider 的實現，從 JSON 文件加載配置
-     */
-    class ConnectionConfigProvider : public JsonProviderBase
+    class ConnectionConfigProvider
     {
     public:
-        ConnectionConfigProvider() = default;
-        explicit ConnectionConfigProvider(const std::string &filePath)
+        // 單次從 JSON 檔載入設定並初始化靜態成員
+        inline static bool loadFromFile(const std::string &filePath)
         {
-            if (!loadFromFile(filePath))
-            {
-                LOG_F(ERROR, "Failed to load configuration from file: %s", filePath.c_str());
-            }
-        }
-        ~ConnectionConfigProvider() override = default;
-
-        /**
-         * 獲取配置數據
-         * @return 配置數據
-         */
-        std::string getRedisUrl() const
-        {
-            if (isJsonDataEmpty())
-            {
-                LOG_F(ERROR, "JSON data is empty");
-                return "";
-            }
-
             try
             {
-                return jsonData_["redis_url"].get<std::string>();
+                std::call_once(initFlag_, [&]()
+                               {
+                                   // 打開檔案，失敗即拋例外
+                                   std::ifstream ifs(filePath);
+                                   if (!ifs)
+                                   {
+                                       throw std::runtime_error("Cannot open config file: " + filePath);
+                                   }
+                                   // 解析完整 JSON
+                                   jsonData_ = nlohmann::json::parse(ifs);
+                                   // 格式檢查：必須是 JSON 物件
+                                   if (!jsonData_.is_object())
+                                   {
+                                       throw std::runtime_error("Invalid config format: not a JSON object");
+                                   }
+                                   // 必填欄位檢查
+                                   if (!jsonData_.contains("redis_url") ||
+                                       !jsonData_.contains("server_port") ||
+                                       !jsonData_.contains("socket_timeout_ms"))
+                                   {
+                                       throw std::runtime_error("Missing required config fields: redis_url, server_port, or socket_timeout_ms");
+                                   }
+                                   // 依欄位類型取值，若型別錯誤則拋例外
+                                   redisUrl_ = jsonData_.at("redis_url").get<std::string>();        // Redis 連線 URL
+                                   serverPort_ = jsonData_.at("server_port").get<int>();            // 服務埠號
+                                   socketTimeoutMs_ = jsonData_.at("socket_timeout_ms").get<int>(); // Socket 超時 (ms)
+                               });
+                return true; // 初次或重覆呼叫後皆回傳成功
             }
-            catch (const nlohmann::json::exception &e)
+            catch (const std::exception &e)
             {
-                LOG_F(ERROR, "Failed to get redis_url: %s", e.what());
-                return "";
+                // 載入或解析失敗時記錄錯誤
+                LOG_F(ERROR, "ConnectionConfigProvider load failed: %s", e.what());
+                return false;
             }
         }
 
-        int getServerPort() const
+        // 純讀：取得 Redis URL，確保已透過 loadFromFile() 初始化
+        inline static const std::string &redisUrl()
         {
-            if (isJsonDataEmpty())
-            {
-                LOG_F(ERROR, "JSON data is empty");
-                return -1;
-            }
-
-            try
-            {
-                return jsonData_["server_port"].get<int>();
-            }
-            catch (const nlohmann::json::exception &e)
-            {
-                LOG_F(ERROR, "Failed to get server_port: %s", e.what());
-                return -1;
-            }
+            return redisUrl_; // e.g. "127.0.0.1:6379"
         }
 
-        bool IsInitializeIndices() const { return initializeIndices_; }
-        void Reset()
+        // 純讀：取得服務埠號
+        inline static int serverPort()
         {
-            redisUrl_ = "";
-            serverPort_ = 0;
-            initializeIndices_ = false;
+            return serverPort_; // e.g. 9516
         }
 
-        /**
-         * 從文件加載配置
-         * @param filePath 配置文件路徑
-         * @return 如果成功加載則返回真
-         */
-        bool loadFromFile(const std::string &filePath) override
+        // 純讀：取得 socket 超時時間 (ms)
+        inline static int socketTimeoutMs()
         {
-            if (!JsonProviderBase::loadFromFile(filePath))
-            {
-                return false; // 父類加載失敗則返回 false
-            }
-
-            nlohmann::json jsonData = JsonProviderBase::getJsonData();
-            try
-            {
-                // 提取特定配置項目
-                redisUrl_ = jsonData.at("redisUrl").get<std::string>();
-                serverPort_ = jsonData.at("serverPort").get<int64_t>();
-                initializeIndices_ = jsonData.at("initializeIndices").get<bool>();
-            }
-            catch (const std::exception &ex)
-            {
-                // LOG_F(ERROR, "Error extracting config: " + std::string(ex.what()));
-                return false; // 如果解析出現錯誤，返回 false
-            }
-
-            return true; // 加載成功返回 true
+            return socketTimeoutMs_; // e.g. 5000
         }
 
     private:
-        std::string redisUrl_;
-        int64_t serverPort_;
-        bool initializeIndices_;
+        // 確保 JSON 只解析一次
+        inline static std::once_flag initFlag_{};
+        // 緩存解析後的設定資料
+        inline static nlohmann::json jsonData_{};
+        // 配置參數
+        inline static std::string redisUrl_ = {};
+        inline static int serverPort_ = 0;
+        inline static int socketTimeoutMs_ = 0;
     };
 
 } // namespace finance::infrastructure::config

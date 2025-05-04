@@ -25,8 +25,7 @@ namespace finance::application
     public:
         FinanceService(
             std::shared_ptr<domain::IPackageHandler> packetHandler,
-            std::shared_ptr<infrastructure::storage::RedisSummaryAdapter> repository,
-            std::shared_ptr<infrastructure::config::AreaBranchProvider> areaBranchProvider);
+            std::shared_ptr<infrastructure::storage::RedisSummaryAdapter> repository);
 
         // Initialize the service with configuration
         domain::Status initialize(const std::string &configPath);
@@ -37,19 +36,9 @@ namespace finance::application
         // Stop the service gracefully
         void shutdown();
 
-        /**
-         * @brief Get the Area Branch Repository
-         * @return The area branch repository instance
-         */
-        std::shared_ptr<infrastructure::config::AreaBranchProvider> getAreaBranchRepo() const
-        {
-            return areaBranchProvider_;
-        }
-
     private:
         std::shared_ptr<domain::IPackageHandler> packetHandler_;
         std::shared_ptr<infrastructure::storage::RedisSummaryAdapter> repository_;
-        std::shared_ptr<infrastructure::config::AreaBranchProvider> areaBranchProvider_;
         std::unique_ptr<infrastructure::network::TcpServiceAdapter> tcpService_;
         std::atomic<int> signalStatus_{0};
     };

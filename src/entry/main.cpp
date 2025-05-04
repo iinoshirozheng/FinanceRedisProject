@@ -19,32 +19,27 @@ int main(int argc, char *argv[])
         LOG_F(INFO, "Starting Finance Service...");
 
         // Load configuration
-        auto configProvider = std::make_shared<infrastructure::config::ConnectionConfigProvider>("connection.json");
-        if (!configProvider->loadFromFile("connection.json"))
+        if (!infrastructure::config::ConnectionConfigProvider::loadFromFile("connection.json"))
         {
             LOG_F(ERROR, "Failed to load configuration");
             return 1;
         }
 
         // Initialize area branch provider
-        auto areaBranchProvider = std::make_shared<infrastructure::config::AreaBranchProvider>();
-        if (!areaBranchProvider->loadFromFile("area_branch.json"))
+        if (!infrastructure::config::AreaBranchProvider::loadFromFile("area_branch.json"))
         {
             LOG_F(ERROR, "Failed to load area-branch mapping");
             return 1;
         }
 
         // Initialize repository
-        auto repository = std::make_shared<infrastructure::storage::RedisSummaryAdapter>(
-            configProvider,
-            areaBranchProvider);
+        auto repository = std::make_shared<infrastructure::storage::RedisSummaryAdapter>();
 
         // Create packet handler factory
-        auto packetHandler = std::make_shared<infrastructure::network::PacketProcessorFactory>(
-            repository, areaBranchProvider);
+        auto packetHandler = std::make_shared<infrastructure::network::PacketProcessorFactory>();
 
         // Create and initialize service
-        application::FinanceService service(packetHandler, repository, areaBranchProvider);
+        application::FinanceService service(packetHandler, repository);
         auto status = service.initialize("connection.json");
         if (!status.isOk())
         {
