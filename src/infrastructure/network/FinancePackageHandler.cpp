@@ -1,152 +1,146 @@
+// infrastructure/network/FinancePackageHandler.cpp
 #include "FinancePackageHandler.h"
-#include <Poco/Net/TCPServer.h>
-#include "../../utils/FinanceUtils.hpp"
+#include "../config/AreaBranchProvider.hpp"
 #include <loguru.hpp>
-#include <stdexcept>
+#include <cstddef> // for offsetof
+#include "../../utils/LogHelper.hpp"
 
 namespace finance::infrastructure::network
 {
-    bool Hcrtm01Handler::processData(const domain::ApData &ap_data)
-    {
-        const domain::MessageDataHCRTM01 &hcrtm01 = ap_data.data.hcrtm01;
-        if (utils::STR_VIEW(hcrtm01.area_center) == utils::STR_VIEW(ap_data.system))
-        {
-            // Convert string values to integers
-            int64_t margin_amount = utils::FinanceUtils::backOfficeToInt(hcrtm01.margin_amount, sizeof(hcrtm01.margin_amount));
-            int64_t margin_buy_order_amount = utils::FinanceUtils::backOfficeToInt(hcrtm01.margin_buy_order_amount, sizeof(hcrtm01.margin_buy_order_amount));
-            int64_t margin_sell_match_amount = utils::FinanceUtils::backOfficeToInt(hcrtm01.margin_sell_match_amount, sizeof(hcrtm01.margin_sell_match_amount));
-            int64_t margin_qty = utils::FinanceUtils::backOfficeToInt(hcrtm01.margin_qty, sizeof(hcrtm01.margin_qty));
-            int64_t margin_buy_order_qty = utils::FinanceUtils::backOfficeToInt(hcrtm01.margin_buy_order_qty, sizeof(hcrtm01.margin_buy_order_qty));
-            int64_t margin_sell_match_qty = utils::FinanceUtils::backOfficeToInt(hcrtm01.margin_sell_match_qty, sizeof(hcrtm01.margin_sell_match_qty));
-            int64_t short_amount = utils::FinanceUtils::backOfficeToInt(hcrtm01.short_amount, sizeof(hcrtm01.short_amount));
-            int64_t short_sell_order_amount = utils::FinanceUtils::backOfficeToInt(hcrtm01.short_sell_order_amount, sizeof(hcrtm01.short_sell_order_amount));
-            int64_t short_qty = utils::FinanceUtils::backOfficeToInt(hcrtm01.short_qty, sizeof(hcrtm01.short_qty));
-            int64_t short_sell_order_qty = utils::FinanceUtils::backOfficeToInt(hcrtm01.short_sell_order_qty, sizeof(hcrtm01.short_sell_order_qty));
-            int64_t short_after_hour_sell_order_amount = utils::FinanceUtils::backOfficeToInt(hcrtm01.short_after_hour_sell_order_amount, sizeof(hcrtm01.short_after_hour_sell_order_amount));
-            int64_t short_after_hour_sell_order_qty = utils::FinanceUtils::backOfficeToInt(hcrtm01.short_after_hour_sell_order_qty, sizeof(hcrtm01.short_after_hour_sell_order_qty));
-            int64_t short_sell_match_amount = utils::FinanceUtils::backOfficeToInt(hcrtm01.short_sell_match_amount, sizeof(hcrtm01.short_sell_match_amount));
-            int64_t margin_after_hour_buy_order_amount = utils::FinanceUtils::backOfficeToInt(hcrtm01.margin_after_hour_buy_order_amount, sizeof(hcrtm01.margin_after_hour_buy_order_amount));
-            int64_t margin_after_hour_buy_order_qty = utils::FinanceUtils::backOfficeToInt(hcrtm01.margin_after_hour_buy_order_qty, sizeof(hcrtm01.margin_after_hour_buy_order_qty));
-            int64_t margin_buy_match_amount = utils::FinanceUtils::backOfficeToInt(hcrtm01.margin_buy_match_amount, sizeof(hcrtm01.margin_buy_match_amount));
-            int64_t margin_buy_match_qty = utils::FinanceUtils::backOfficeToInt(hcrtm01.margin_buy_match_qty, sizeof(hcrtm01.margin_buy_match_qty));
-
-            // Calculate available amounts
-            int64_t after_margin_available_amount = margin_amount - margin_buy_match_amount + margin_sell_match_amount - margin_after_hour_buy_order_amount;
-            int64_t after_margin_available_qty = margin_qty - margin_buy_match_qty + margin_sell_match_qty - margin_after_hour_buy_order_qty;
-            int64_t after_short_available_amount = short_amount - short_sell_match_amount - short_after_hour_sell_order_amount;
-            int64_t after_short_available_qty = short_qty - short_sell_order_qty - short_after_hour_sell_order_qty;
-
-            int64_t margin_available_amount = margin_amount - margin_buy_order_amount + margin_sell_match_amount;
-            int64_t margin_available_qty = margin_qty - margin_buy_order_qty + margin_sell_match_qty;
-            int64_t short_available_amount = short_amount - short_sell_order_amount;
-            int64_t short_available_qty = short_qty - short_sell_order_qty;
-
-            // Create summary data
-            domain::SummaryData summary_data;
-            summary_data.stock_id = utils::STR_VIEW(hcrtm01.stock_id);
-            summary_data.area_center = utils::STR_VIEW(hcrtm01.area_center);
-            summary_data.margin_available_amount = margin_available_amount;
-            summary_data.margin_available_qty = margin_available_qty;
-            summary_data.short_available_amount = short_available_amount;
-            summary_data.short_available_qty = short_available_qty;
-            summary_data.after_margin_available_amount = after_margin_available_amount;
-            summary_data.after_margin_available_qty = after_margin_available_qty;
-            summary_data.after_short_available_amount = after_short_available_amount;
-            summary_data.after_short_available_qty = after_short_available_qty;
-
-            // Get belong branches from area branch provider
-            summary_data.belong_branches = config::AreaBranchProvider::getBranchesForArea(summary_data.area_center);
-
-            // Save to repository
-            if (!storage::RedisSummaryAdapter::syncToRedis(summary_data).isOk())
-            {
-                LOG_F(ERROR, "Failed to save summary data for stock: %s", summary_data.stock_id.c_str());
-                return false;
-            }
-
-            // Update company summary
-            if (!storage::RedisSummaryAdapter::updateCompanySummary(summary_data.stock_id))
-            {
-                LOG_F(ERROR, "Failed to update company summary for stock: %s", summary_data.stock_id.c_str());
-                return false;
-            }
-
-            LOG_F(INFO, "Processed HCRTM01 data for stock: %s, area: %s",
-                  summary_data.stock_id.c_str(), summary_data.area_center.c_str());
-            return true;
-        }
-        return false;
-    }
-
-    bool Hcrtm05pHandler::processData(const domain::ApData &ap_data)
-    {
-        const domain::MessageDataHCRTM05P &hcrtm05p = ap_data.data.hcrtm05p;
-
-        // Convert string values to integers
-        int64_t margin_buy_offset_qty = utils::FinanceUtils::backOfficeToInt(hcrtm05p.margin_buy_offset_qty, sizeof(hcrtm05p.margin_buy_offset_qty));
-        int64_t short_sell_offset_qty = utils::FinanceUtils::backOfficeToInt(hcrtm05p.short_sell_offset_qty, sizeof(hcrtm05p.short_sell_offset_qty));
-
-        // Create summary data
-        domain::SummaryData summary_data;
-        summary_data.stock_id = utils::STR_VIEW(hcrtm05p.stock_id);
-        summary_data.area_center = utils::STR_VIEW(hcrtm05p.broker_id);
-        summary_data.margin_available_qty = margin_buy_offset_qty;
-        summary_data.short_available_qty = short_sell_offset_qty;
-        summary_data.after_margin_available_qty = margin_buy_offset_qty;
-        summary_data.after_short_available_qty = short_sell_offset_qty;
-
-        // Get belong branches from area branch provider
-        summary_data.belong_branches = config::AreaBranchProvider::getBranchesForArea(summary_data.area_center);
-
-        // Save to repository
-        if (!storage::RedisSummaryAdapter::syncToRedis(summary_data).isOk())
-        {
-            LOG_F(ERROR, "Failed to save summary data for stock: %s", summary_data.stock_id.c_str());
-            return false;
-        }
-
-        // Update company summary
-        if (!storage::RedisSummaryAdapter::updateCompanySummary(summary_data.stock_id))
-        {
-            LOG_F(ERROR, "Failed to update company summary for stock: %s", summary_data.stock_id.c_str());
-            return false;
-        }
-
-        LOG_F(INFO, "Processed HCRTM05P data for stock: %s, broker: %s",
-              summary_data.stock_id.c_str(), summary_data.area_center.c_str());
-        return true;
-    }
+    using domain::Error;
+    using domain::ErrorCode;
+    using domain::Result;
+    using utils::FinanceUtils;
+    namespace config = finance::infrastructure::config;
 
     PacketProcessorFactory::PacketProcessorFactory()
     {
-        handlers_["ELD001"] = std::make_unique<Hcrtm01Handler>();
-        handlers_["ELD002"] = std::make_unique<Hcrtm05pHandler>();
+        handlers_.emplace("ELD001", std::make_unique<Hcrtm01Handler>());
+        handlers_.emplace("ELD002", std::make_unique<Hcrtm05pHandler>());
     }
 
-    bool PacketProcessorFactory::processData(const domain::ApData &ap_data)
-    {
-        if (ap_data.entry_type[0] != 'A' && ap_data.entry_type[0] != 'C')
-        {
-            LOG_F(WARNING, "Invalid entry type: %c", ap_data.entry_type[0]);
-            return false;
-        }
-
-        auto parent = reinterpret_cast<const domain::FinancePackageMessage *>(
-            reinterpret_cast<const char *>(&ap_data) - offsetof(domain::FinancePackageMessage, ap_data));
-
-        auto handler = getProcessorHandler(std::string_view(parent->t_code, sizeof(parent->t_code)));
-        if (!handler)
-        {
-            LOG_F(WARNING, "No handler found for t_code: %s", std::string(parent->t_code).c_str());
-            return false;
-        }
-        return handler->processData(ap_data);
-    }
-
-    domain::IPackageHandler *PacketProcessorFactory::getProcessorHandler(const std::string_view &tcode)
+    domain::IPackageHandler *
+    PacketProcessorFactory::getProcessorHandler(const std::string_view &tcode) const
     {
         auto it = handlers_.find(tcode);
         return it != handlers_.end() ? it->second.get() : nullptr;
     }
 
-} // namespace finance::infrastructure::network
+    Result<SummaryData>
+    PacketProcessorFactory::processData(const domain::ApData &ap_data)
+    {
+        char et = ap_data.entry_type[0];
+        if (et != 'A' && et != 'C')
+            return Result<SummaryData>::Err({ErrorCode::InvalidPacket, "Invalid entry type"});
+
+        // 由 ap_data 反推父結構，讀取 t_code
+        auto pkg = reinterpret_cast<const domain::FinancePackageMessage *>(
+            reinterpret_cast<const char *>(&ap_data) - offsetof(domain::FinancePackageMessage, ap_data));
+        std::string_view tcode(pkg->t_code, sizeof(pkg->t_code));
+
+        LOG_F(INFO, "enter processData, t_code=%.*s", int(tcode.size()), tcode.data());
+
+        auto *handler = getProcessorHandler(tcode);
+        if (!handler)
+        {
+            LOG_F(WARNING, "找不到處理器 t_code=%.*s", int(tcode.size()), tcode.data());
+            return Result<SummaryData>::Err({ErrorCode::UnknownTransactionCode, "Unknown t_code"});
+        }
+
+        auto result = static_cast<Hcrtm01Handler *>(handler)->processData(ap_data);
+        LOG_F(INFO, "exit processData, result=%s",
+              result.is_ok() ? "OK" : result.unwrap_err().message.c_str());
+        return result;
+    }
+
+    Result<SummaryData>
+    Hcrtm01Handler::processData(const domain::ApData &ap_data)
+    {
+        const auto &h = ap_data.data.hcrtm01;
+        // 僅處理符合系統的 area_center
+        if (std::string_view(h.area_center, sizeof(h.area_center)) != std::string_view(ap_data.system, sizeof(ap_data.system)))
+        {
+            return Result<SummaryData>::Err({ErrorCode::InvalidPacket, "Invalid area center"});
+        }
+
+        // 一次 BCD→int 轉換
+        auto ma = FinanceUtils::backOfficeToInt(h.margin_amount, sizeof(h.margin_amount));
+        auto mboA = FinanceUtils::backOfficeToInt(h.margin_buy_order_amount, sizeof(h.margin_buy_order_amount));
+        auto msmA = FinanceUtils::backOfficeToInt(h.margin_sell_match_amount, sizeof(h.margin_sell_match_amount));
+        auto mq = FinanceUtils::backOfficeToInt(h.margin_qty, sizeof(h.margin_qty));
+        auto mboQ = FinanceUtils::backOfficeToInt(h.margin_buy_order_qty, sizeof(h.margin_buy_order_qty));
+        auto msmQ = FinanceUtils::backOfficeToInt(h.margin_sell_match_qty, sizeof(h.margin_sell_match_qty));
+        auto mbmA = FinanceUtils::backOfficeToInt(h.margin_buy_match_amount, sizeof(h.margin_buy_match_amount));
+        auto mbmQ = FinanceUtils::backOfficeToInt(h.margin_buy_match_qty, sizeof(h.margin_buy_match_qty));
+        auto ahbA = FinanceUtils::backOfficeToInt(h.margin_after_hour_buy_order_amount,
+                                                  sizeof(h.margin_after_hour_buy_order_amount));
+        auto ahbQ = FinanceUtils::backOfficeToInt(h.margin_after_hour_buy_order_qty,
+                                                  sizeof(h.margin_after_hour_buy_order_qty));
+
+        auto sa = FinanceUtils::backOfficeToInt(h.short_amount, sizeof(h.short_amount));
+        auto ssoA = FinanceUtils::backOfficeToInt(h.short_sell_order_amount,
+                                                  sizeof(h.short_sell_order_amount));
+        auto sq = FinanceUtils::backOfficeToInt(h.short_qty, sizeof(h.short_qty));
+        auto ssoQ = FinanceUtils::backOfficeToInt(h.short_sell_order_qty,
+                                                  sizeof(h.short_sell_order_qty));
+        auto ssmA = FinanceUtils::backOfficeToInt(h.short_sell_match_amount,
+                                                  sizeof(h.short_sell_match_amount));
+        auto ssmQ = FinanceUtils::backOfficeToInt(h.short_sell_match_qty,
+                                                  sizeof(h.short_sell_match_qty));
+        auto ahsA = FinanceUtils::backOfficeToInt(h.short_after_hour_sell_order_amount,
+                                                  sizeof(h.short_after_hour_sell_order_amount));
+        auto ahsQ = FinanceUtils::backOfficeToInt(h.short_after_hour_sell_order_qty,
+                                                  sizeof(h.short_after_hour_sell_order_qty));
+
+        SummaryData s;
+        s.stock_id = std::string_view(h.stock_id, sizeof(h.stock_id));
+        s.area_center = std::string_view(h.area_center, sizeof(h.area_center));
+
+        // 盤中可用
+        s.margin_available_amount = ma - mboA + msmA;
+        s.margin_available_qty = mq - mboQ + msmQ;
+        s.short_available_amount = sa - ssoA;
+        s.short_available_qty = sq - ssoQ;
+
+        // 盤後可用（Qty 從 match_qty 扣除）
+        s.after_margin_available_amount = ma - mbmA + msmA - ahbA;
+        s.after_margin_available_qty = mq - mbmQ + msmQ - ahbQ;
+
+        s.after_short_available_amount = sa - ssmA - ahsA;
+        s.after_short_available_qty = sq - ssmQ - ahsQ;
+
+        s.belong_branches = config::AreaBranchProvider::getBranchesForArea(s.area_center);
+
+        LOG_CTX(std::string_view(h.stock_id, sizeof(h.stock_id)),
+                s.stock_id, s.area_center, INFO,
+                "margin_avail_qty=%ld", s.margin_available_qty);
+
+        return Result<SummaryData>::Ok(std::move(s));
+    }
+
+    Result<SummaryData>
+    Hcrtm05pHandler::processData(const domain::ApData &ap_data)
+    {
+        const auto &h = ap_data.data.hcrtm05p;
+        SummaryData s;
+        s.stock_id = std::string_view(h.stock_id, sizeof(h.stock_id));
+        s.area_center = std::string_view(h.broker_id, sizeof(h.broker_id));
+
+        auto buyOff = FinanceUtils::backOfficeToInt(h.margin_buy_offset_qty,
+                                                    sizeof(h.margin_buy_offset_qty));
+        auto sellOff = FinanceUtils::backOfficeToInt(h.short_sell_offset_qty,
+                                                     sizeof(h.short_sell_offset_qty));
+
+        s.margin_available_qty = buyOff;
+        s.short_available_qty = sellOff;
+        s.after_margin_available_qty = buyOff;
+        s.after_short_available_qty = sellOff;
+        s.belong_branches = config::AreaBranchProvider::getBranchesForArea(s.area_center);
+
+        LOG_CTX(std::string_view(h.stock_id, sizeof(h.stock_id)),
+                s.stock_id, s.area_center, INFO,
+                "margin_avail_qty=%ld", s.margin_available_qty);
+
+        return Result<SummaryData>::Ok(std::move(s));
+    }
+}

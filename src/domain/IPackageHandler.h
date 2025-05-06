@@ -1,7 +1,8 @@
 #pragma once
 
 #include "./FinanceDataStructure.h"
-
+#include "./Result.hpp"
+#include "./Error.hpp"
 namespace finance::domain
 {
     // 通用數據處理器介面，基於模板的方式
@@ -14,7 +15,7 @@ namespace finance::domain
         // @param data 要處理的數據（模板類型 T）
         // @param optionalHeader 可選的頭部信息
         // @return 如果處理成功則返回 true
-        virtual bool processData(const struct domain::ApData &data) = 0;
+        virtual Result<SummaryData> processData(const struct domain::ApData &data) = 0;
     };
 
 } // namespace finance::domain

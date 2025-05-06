@@ -1,532 +1,223 @@
+// RedisSummaryAdapter.cpp
 #include "RedisSummaryAdapter.h"
-#include "../../utils/FinanceUtils.hpp"
+#include "RedisClient.hpp"
 #include <loguru.hpp>
-#include <nlohmann/json.hpp>
-#include <hiredis/hiredis.h>
 
 namespace finance::infrastructure::storage
 {
-    const std::string RedisSummaryAdapter::KEY_PREFIX = "summary";
-    redisContext *RedisSummaryAdapter::redisContext_ = nullptr;
-    std::map<std::string, domain::SummaryData> RedisSummaryAdapter::summaryCache_;
-    std::mutex RedisSummaryAdapter::cacheMutex_;
+    using finance::domain::Result;
 
-    RedisSummaryAdapter::RedisSummaryAdapter()
+    Result<void, ResultError> RedisSummaryAdapter::init()
     {
-        auto status = connectToRedis();
-        if (!status.isOk())
+        if (ctx_)
+            return Result<void, ResultError>::Ok();
+
+        auto conn = connect_redis(
+            config::ConnectionConfigProvider::redisUrl(),
+            config::ConnectionConfigProvider::serverPort());
+        if (conn.is_err())
+            return Result<void, ResultError>::Err(conn.unwrap_err());
+
+        ctx_ = std::move(conn.unwrap());
+        return Result<void, ResultError>::Ok();
+    }
+
+    Result<void, ResultError> RedisSummaryAdapter::sync(const SummaryData &data)
+    {
+        // Lazy init
+        if (!ctx_)
         {
-            LOG_F(ERROR, "%s", status.toString().c_str());
+            auto r = init();
+            if (r.is_err())
+                return r;
         }
-    }
 
-    RedisSummaryAdapter::~RedisSummaryAdapter()
-    {
-        disconnectToRedis();
-    }
+        // 序列化
+        auto jres = toJson(data);
+        if (jres.is_err())
+            return Result<void, ResultError>::Err(jres.unwrap_err());
 
-    bool RedisSummaryAdapter::init()
-    {
-        auto status = connectToRedis();
-        if (!status.isOk())
+        // 寫 Redis
+        std::string key = makeKey(data);
+        auto setRes = redis_set(ctx_.get(), key, jres.unwrap());
+        if (setRes.is_err())
+            return setRes;
+
+        // 更新本地快取
         {
-            LOG_F(ERROR, "%s", status.toString().c_str());
-            return false;
+            std::unique_lock lock(cacheMutex_);
+            cache_[key] = data;
         }
-        return true;
+        return Result<void, ResultError>::Ok();
     }
 
-    domain::Status RedisSummaryAdapter::connectToRedis()
+    Result<SummaryData, ResultError> RedisSummaryAdapter::get(const std::string &key)
     {
-        try
         {
-            if (redisContext_)
+            std::shared_lock lock(cacheMutex_);
+            if (auto it = cache_.find(key); it != cache_.end())
+                return Result<SummaryData, ResultError>::Ok(it->second);
+        }
+
+        // 本地無，從 Redis 讀取
+        auto jres = getJson(key);
+        if (jres.is_err())
+            return Result<SummaryData, ResultError>::Err(jres.unwrap_err());
+
+        auto deser = fromJson(jres.unwrap());
+        if (deser.is_err())
+            return deser;
+
+        // 更新快取
+        {
+            std::unique_lock lock(cacheMutex_);
+            cache_[key] = deser.unwrap();
+        }
+        return deser;
+    }
+
+    Result<void, ResultError> RedisSummaryAdapter::remove(const std::string &key)
+    {
+        if (!ctx_)
+        {
+            auto r = init();
+            if (r.is_err())
+                return r;
+        }
+
+        auto delRes = redis_del(ctx_.get(), key);
+        if (delRes.is_err())
+            return delRes;
+
+        {
+            std::unique_lock lock(cacheMutex_);
+            cache_.erase(key);
+        }
+        return Result<void, ResultError>::Ok();
+    }
+
+    Result<void, ResultError> RedisSummaryAdapter::loadAll()
+    {
+        if (!ctx_)
+        {
+            auto r = init();
+            if (r.is_err())
+                return r;
+        }
+
+        // 取所有 key
+        auto keysRes = getKeys(std::string(KEY_PREFIX) + ":*");
+        if (keysRes.is_err())
+            return Result<void, ResultError>::Err(keysRes.unwrap_err());
+
+        // 清快取並重載
+        {
+            std::unique_lock lock(cacheMutex_);
+            cache_.clear();
+        }
+
+        for (auto &key : keysRes.unwrap())
+        {
+            auto gre = get(key);
+            if (gre.is_ok())
             {
-                return domain::Status::ok()
-                    .withOperation("connect")
-                    .withResponse("Already connected");
-            }
-
-            redisContext_ = redisConnect(config::ConnectionConfigProvider::redisUrl().c_str(), 6479);
-            if (!redisContext_ || redisContext_->err)
-            {
-                std::string error = redisContext_ ? redisContext_->errstr : "Failed to allocate Redis context";
-                return domain::Status::error(domain::Status::Code::ConnectionError, error)
-                    .withOperation("connect")
-                    .withRequest(config::ConnectionConfigProvider::redisUrl());
-            }
-
-            return domain::Status::ok()
-                .withOperation("connect")
-                .withRequest(config::ConnectionConfigProvider::redisUrl());
-        }
-        catch (const std::exception &ex)
-        {
-            return domain::Status::error(domain::Status::Code::ConnectionError, ex.what())
-                .withOperation("connect")
-                .withRequest(config::ConnectionConfigProvider::redisUrl());
-        }
-    }
-
-    void RedisSummaryAdapter::disconnectToRedis()
-    {
-        if (redisContext_)
-        {
-            redisFree(redisContext_);
-            redisContext_ = nullptr;
-        }
-    }
-
-    bool RedisSummaryAdapter::setData(const std::string &key, const domain::SummaryData &data)
-    {
-        std::lock_guard<std::mutex> lock(cacheMutex_);
-        auto result = summaryCache_.insert({key, data});
-        if (!result.second)
-        {
-            summaryCache_[key] = data;
-            return true;
-        }
-        return false;
-    }
-
-    domain::Status RedisSummaryAdapter::getSummaryDataFromRedis(const std::string &key, domain::SummaryData &data)
-    {
-        try
-        {
-            domain::Status status = connectToRedis();
-            if (!status.isOk())
-            {
-                return status;
-            }
-
-            redisReply *reply = (redisReply *)redisCommand(redisContext_, "GET %s", key.c_str());
-            std::string response = reply ? reply->str : "";
-
-            domain::Status result;
-            if (!reply)
-            {
-                result = domain::Status::error(domain::Status::Code::RedisError, "No reply")
-                             .withOperation("find")
-                             .withKey(key)
-                             .withResponse(response);
-            }
-            else if (reply->type == REDIS_REPLY_NIL)
-            {
-                result = domain::Status::error(domain::Status::Code::NotFound, "Key not found")
-                             .withOperation("find")
-                             .withKey(key)
-                             .withResponse(response);
+                std::unique_lock lock(cacheMutex_);
+                cache_[key] = gre.unwrap();
             }
             else
             {
-                result = deserializeSummaryData(reply->str, data);
-                result.withOperation("find")
-                    .withKey(key)
-                    .withResponse(response);
+                LOG_F(WARNING, "Redis loadAll: key=%s failed: %s",
+                      key.c_str(), gre.unwrap_err().message.c_str());
             }
-
-            if (reply)
-                freeReplyObject(reply);
-
-            if (!result.isOk())
-            {
-                LOG_F(ERROR, "%s", result.toString().c_str());
-            }
-            else
-            {
-                LOG_F(INFO, "%s", result.toString().c_str());
-            }
-
-            return result;
         }
-        catch (const std::exception &ex)
-        {
-            auto status = domain::Status::error(domain::Status::Code::RedisError, ex.what())
-                              .withOperation("find")
-                              .withKey(key);
-            LOG_F(ERROR, "%s", status.toString().c_str());
-            return status;
-        }
+        return Result<void, ResultError>::Ok();
     }
 
-    bool RedisSummaryAdapter::removeData(const std::string &key)
+    std::unordered_map<std::string, SummaryData> RedisSummaryAdapter::getAll() const
     {
-        std::lock_guard<std::mutex> lock(cacheMutex_);
-        size_t removed = summaryCache_.erase(key);
-
-        if (removed > 0)
-        {
-            LOG_F(INFO, "Successfully to removed key: %s", key.c_str());
-            return true;
-        }
-        else
-        {
-            LOG_F(INFO, "Failed to removed key: %s", key.c_str());
-            return false;
-        }
+        std::shared_lock lock(cacheMutex_);
+        return cache_;
     }
 
-    domain::Status RedisSummaryAdapter::loadAllFromRedis()
+    // private helpers
+
+    Result<std::vector<std::string>, ResultError> RedisSummaryAdapter::getKeys(const std::string &pattern)
     {
-        // 1. 連接 Redis
-        domain::Status status = connectToRedis();
-        if (!status.isOk())
-        {
-            return status; // 如果無法連接，返回錯誤
-        }
+        redisReply *r = static_cast<redisReply *>(
+            redisCommand(ctx_.get(), "KEYS %s", pattern.c_str()));
+        if (!r)
+            return Result<std::vector<std::string>, ResultError>::Err(ResultError("KEYS failed"));
+        std::unique_ptr<redisReply, decltype(&freeReplyObject)> guard(r, freeReplyObject);
 
-        try
-        {
-            // 2. 執行 Redis 命令，查詢所有以 "summary:*" 開頭的鍵
-            redisReply *reply = static_cast<redisReply *>(redisCommand(redisContext_, "KEYS summary:*"));
+        if (r->type != REDIS_REPLY_ARRAY)
+            return Result<std::vector<std::string>, ResultError>::Err(ResultError("KEYS unexpected reply"));
 
-            // 3. 驗證 reply 是否正確
-            if (!reply || reply->type != REDIS_REPLY_ARRAY)
-            {
-                std::string response = reply ? reply->str : "Null reply or invalid type";
-                if (reply)
-                    freeReplyObject(reply);
-                return domain::Status::error(domain::Status::Code::RedisError, "Invalid reply type")
-                    .withOperation("loadAll")
-                    .withResponse(response);
-            }
-
-            // 4. 提取所有 keys
-            std::vector<std::string> keys;
-            for (size_t i = 0; i < reply->elements; i++)
-            {
-                keys.emplace_back(reply->element[i]->str);
-            }
-            freeReplyObject(reply); // 釋放 reply
-
-            // 5. 清空緩存
-            {
-                std::lock_guard<std::mutex> lock(cacheMutex_);
-                summaryCache_.clear();
-            }
-
-            // 6. 加載每個鍵對應的數據
-            for (const auto &key : keys)
-            {
-                domain::SummaryData data;
-
-                domain::Status status = findSummaryDataFromRedis(key, data);
-                LOG_F(INFO, "%s", status.toString().c_str());
-
-                std::lock_guard<std::mutex> lock(cacheMutex_);
-                summaryCache_[key] = data;
-            }
-
-            // 7. 返回成功狀態
-            LOG_F(INFO, "Successfully loaded %lu keys from Redis.", keys.size());
-            return domain::Status::ok()
-                .withOperation("loadAll")
-                .withResponse("Successfully loaded data from Redis");
-        }
-        catch (const std::exception &ex)
-        {
-            // 捕獲任何例外並返回錯誤狀態
-            auto status = domain::Status::error(domain::Status::Code::RedisError, ex.what())
-                              .withOperation("loadAll");
-            LOG_F(ERROR, "%s", status.toString().c_str());
-            return status;
-        }
-        return status;
+        std::vector<std::string> result;
+        for (size_t i = 0; i < r->elements; ++i)
+            result.emplace_back(r->element[i]->str);
+        return Result<std::vector<std::string>, ResultError>::Ok(result);
     }
 
-    std::map<std::string, domain::SummaryData> &RedisSummaryAdapter::getAllMapped()
+    Result<std::string, ResultError> RedisSummaryAdapter::getJson(const std::string &key)
     {
-        std::lock_guard<std::mutex> lock(cacheMutex_);
-        return summaryCache_;
+        // 目前僅支援 JSON.GET
+        redisReply *r = static_cast<redisReply *>(
+            redisCommand(ctx_.get(), "JSON.GET %s", key.c_str()));
+        if (!r)
+            return Result<std::string, ResultError>::Err(ResultError("JSON.GET failed"));
+        std::unique_ptr<redisReply, decltype(&freeReplyObject)> guard(r, freeReplyObject);
+
+        if (r->type != REDIS_REPLY_STRING)
+            return Result<std::string, ResultError>::Err(ResultError("JSON.GET unexpected reply"));
+        return Result<std::string, ResultError>::Ok(std::string(r->str));
     }
 
-    bool RedisSummaryAdapter::updateData(const std::string &key, const domain::SummaryData &data)
-    {
-        return setData(key, data);
-    }
-
-    bool RedisSummaryAdapter::updateCompanySummary(const std::string &stock_id)
-    {
-        domain::SummaryData company_summary;
-        for (const auto &backoffice_id : config::AreaBranchProvider::getBackofficeIds())
-        {
-            std::string key = KEY_PREFIX + ":" + backoffice_id + ":" + stock_id;
-
-            if (domain::SummaryData *area_summary_data = getData(key))
-            {
-                company_summary.area_center = "ALL";
-                company_summary.stock_id = area_summary_data->stock_id;
-                company_summary.belong_branches = config::AreaBranchProvider::getAllBranches();
-                company_summary.margin_available_amount += area_summary_data->margin_available_amount;
-                company_summary.margin_available_qty += area_summary_data->margin_available_qty;
-                company_summary.short_available_amount += area_summary_data->short_available_amount;
-                company_summary.short_available_qty += area_summary_data->short_available_qty;
-                company_summary.after_margin_available_amount += area_summary_data->after_margin_available_amount;
-                company_summary.after_margin_available_qty += area_summary_data->after_margin_available_qty;
-                company_summary.after_short_available_amount += area_summary_data->after_short_available_amount;
-                company_summary.after_short_available_qty += area_summary_data->after_short_available_qty;
-            }
-        }
-
-        return syncToRedis(company_summary).isOk();
-    }
-
-    domain::Status RedisSummaryAdapter::serializeSummaryData(const domain::SummaryData &data, std::string &out_dump)
+    Result<std::string, ResultError> RedisSummaryAdapter::toJson(const SummaryData &d)
     {
         try
         {
             nlohmann::json j;
-            j["stock_id"] = data.stock_id;
-            j["area_center"] = data.area_center;
-            j["margin_available_amount"] = data.margin_available_amount;
-            j["margin_available_qty"] = data.margin_available_qty;
-            j["short_available_amount"] = data.short_available_amount;
-            j["short_available_qty"] = data.short_available_qty;
-            j["after_margin_available_amount"] = data.after_margin_available_amount;
-            j["after_margin_available_qty"] = data.after_margin_available_qty;
-            j["after_short_available_amount"] = data.after_short_available_amount;
-            j["after_short_available_qty"] = data.after_short_available_qty;
-            j["belong_branches"] = data.belong_branches;
-            out_dump = j.dump();
-            return domain::Status::ok()
-                .withOperation("serializeSummaryData")
-                .withRequest(out_dump);
+            j["stock_id"] = d.stock_id;
+            j["area_center"] = d.area_center;
+            j["margin_available_amount"] = d.margin_available_amount;
+            j["margin_available_qty"] = d.margin_available_qty;
+            j["short_available_amount"] = d.short_available_amount;
+            j["short_available_qty"] = d.short_available_qty;
+            j["after_margin_available_amount"] = d.after_margin_available_amount;
+            j["after_margin_available_qty"] = d.after_margin_available_qty;
+            j["after_short_available_amount"] = d.after_short_available_amount;
+            j["after_short_available_qty"] = d.after_short_available_qty;
+            j["belong_branches"] = d.belong_branches;
+            return Result<std::string, ResultError>::Ok(j.dump());
         }
         catch (const std::exception &ex)
         {
-            return domain::Status::error(domain::Status::Code::DeserializationError, ex.what())
-                .withOperation("serializeSummaryData");
+            return Result<std::string, ResultError>::Err(ResultError(ex.what()));
         }
     }
 
-    domain::Status RedisSummaryAdapter::deserializeSummaryData(const std::string &json, domain::SummaryData &out_data)
+    Result<SummaryData, ResultError> RedisSummaryAdapter::fromJson(const std::string &jsonStr)
     {
         try
         {
-            auto j = nlohmann::json::parse(json);
-            out_data.stock_id = j["stock_id"].get<std::string>();
-            out_data.area_center = j["area_center"].get<std::string>();
-            out_data.margin_available_amount = j["margin_available_amount"].get<double>();
-            out_data.margin_available_qty = j["margin_available_qty"].get<int64_t>();
-            out_data.short_available_amount = j["short_available_amount"].get<double>();
-            out_data.short_available_qty = j["short_available_qty"].get<int64_t>();
-            out_data.after_margin_available_amount = j["after_margin_available_amount"].get<double>();
-            out_data.after_margin_available_qty = j["after_margin_available_qty"].get<int64_t>();
-            out_data.after_short_available_amount = j["after_short_available_amount"].get<double>();
-            out_data.after_short_available_qty = j["after_short_available_qty"].get<int64_t>();
-            out_data.belong_branches = j["belong_branches"].get<std::vector<std::string>>();
-            return domain::Status::ok()
-                .withOperation("deserializeSummaryData")
-                .withRequest(json);
+            auto j = nlohmann::json::parse(jsonStr);
+            SummaryData d;
+            d.stock_id = j.at("stock_id").get<std::string>();
+            d.area_center = j.at("area_center").get<std::string>();
+            d.margin_available_amount = j.at("margin_available_amount").get<int64_t>();
+            d.margin_available_qty = j.at("margin_available_qty").get<int64_t>();
+            d.short_available_amount = j.at("short_available_amount").get<int64_t>();
+            d.short_available_qty = j.at("short_available_qty").get<int64_t>();
+            d.after_margin_available_amount = j.at("after_margin_available_amount").get<int64_t>();
+            d.after_margin_available_qty = j.at("after_margin_available_qty").get<int64_t>();
+            d.after_short_available_amount = j.at("after_short_available_amount").get<int64_t>();
+            d.after_short_available_qty = j.at("after_short_available_qty").get<int64_t>();
+            d.belong_branches = j.at("belong_branches").get<std::vector<std::string>>();
+            return Result<SummaryData, ResultError>::Ok(std::move(d));
         }
         catch (const std::exception &ex)
         {
-            return domain::Status::error(domain::Status::Code::DeserializationError, ex.what())
-                .withOperation("deserializeSummaryData")
-                .withRequest(json);
+            return Result<SummaryData, ResultError>::Err(ResultError(ex.what()));
         }
-    }
-
-    domain::Status RedisSummaryAdapter::syncToRedis(const domain::SummaryData &data)
-    {
-        try
-        {
-            if (!redisContext_)
-            {
-                return domain::Status::error(domain::Status::Code::ConnectionError, "Not connected to Redis");
-            }
-
-            std::string out_key = utils::FinanceUtils::generateKey(KEY_PREFIX, data);
-            std::string out_json;
-            serializeSummaryData(data, out_json);
-
-            redisReply *reply = (redisReply *)redisCommand(redisContext_, "SET %s %s", out_key.c_str(), out_json.c_str());
-            std::string response = reply ? reply->str : "redisReply == nullptr";
-
-            domain::Status status = reply && reply->type != REDIS_REPLY_ERROR
-                                        ? domain::Status::ok()
-                                              .withOperation("save to redis")
-                                              .withKey(out_key)
-                                              .withRequest(out_json)
-                                              .withResponse(response)
-                                        : domain::Status::error(domain::Status::Code::RedisError, reply ? reply->str : "no reply")
-                                              .withOperation("save to redis")
-                                              .withKey(out_key)
-                                              .withRequest(out_json)
-                                              .withResponse(response);
-
-            if (reply)
-                freeReplyObject(reply);
-
-            if (!status.isOk())
-            {
-                LOG_F(ERROR, "%s", status.toString().c_str());
-            }
-            else
-            {
-                LOG_F(INFO, "%s", status.toString().c_str());
-            }
-
-            std::lock_guard<std::mutex> lock(cacheMutex_);
-            summaryCache_[out_key] = data;
-            return status;
-        }
-        catch (const std::exception &ex)
-        {
-            auto status = domain::Status::error(domain::Status::Code::RedisError, ex.what())
-                              .withOperation("set");
-            LOG_F(ERROR, "%s", status.toString().c_str());
-            return status;
-        }
-    }
-
-    domain::Status RedisSummaryAdapter::removeSummaryDataFromRedis(const std::string &key)
-    {
-        try
-        {
-            domain::Status status = connectToRedis();
-            if (!status.isOk())
-            {
-                return status; // 如果無法連接，返回錯誤
-            }
-
-            redisReply *reply = (redisReply *)redisCommand(redisContext_, "DEL %s", key.c_str());
-            std::string response = reply ? reply->str : "";
-
-            status = reply && reply->type != REDIS_REPLY_ERROR
-                         ? domain::Status::ok()
-                               .withOperation("remove")
-                               .withKey(key)
-                               .withResponse(response)
-                         : domain::Status::error(domain::Status::Code::RedisError, reply ? reply->str : "no reply")
-                               .withOperation("remove")
-                               .withKey(key)
-                               .withResponse(response);
-
-            if (reply)
-                freeReplyObject(reply);
-
-            if (!status.isOk())
-            {
-                LOG_F(ERROR, "%s", status.toString().c_str());
-            }
-            else
-            {
-                LOG_F(INFO, "%s", status.toString().c_str());
-            }
-
-            // Remove from cache
-            std::lock_guard<std::mutex> lock(cacheMutex_);
-            summaryCache_.erase(key);
-            return status;
-        }
-        catch (const std::exception &ex)
-        {
-            auto status = domain::Status::error(domain::Status::Code::RedisError, ex.what())
-                              .withOperation("removeSummaryDataFromRedis")
-                              .withKey(key);
-            LOG_F(ERROR, "%s", status.toString().c_str());
-            return status;
-        }
-    }
-
-    domain::Status RedisSummaryAdapter::findSummaryDataFromRedis(const std::string &key, domain::SummaryData &out_data)
-    {
-        try
-        {
-            domain::Status status = connectToRedis();
-            if (!status.isOk())
-            {
-                return status; // 如果無法連接，返回錯誤
-            }
-
-            // 1. 从 Redis 中执行 JSON.GET 命令获取数据（假设数据以 JSON 格式存储）
-            redisReply *reply = static_cast<redisReply *>(redisCommand(redisContext_, "JSON.GET %s", key.c_str()));
-
-            // 2. 检查 reply 是否有效
-            if (!reply || reply->type != REDIS_REPLY_STRING)
-            {
-                if (reply)
-                    freeReplyObject(reply);
-                LOG_F(WARNING, "Failed to fetch data for key '%s'. Reply was null or not a string.", key.c_str());
-                return domain::Status::error(domain::Status::Code::RedisError, reply ? reply->str : "no reply")
-                    .withOperation("remove")
-                    .withKey(key);
-            }
-
-            // 3. 解析 JSON 返回的数据
-            std::string json_str(reply->str);
-            freeReplyObject(reply); // 确保释放资源
-
-            return deserializeSummaryData(json_str, out_data);
-        }
-        catch (const std::exception &ex)
-        {
-            auto status = domain::Status::error(domain::Status::Code::RedisError, ex.what())
-                              .withOperation("findSummaryDataFromRedis")
-                              .withKey(key);
-            LOG_F(ERROR, "%s", status.toString().c_str());
-            return status;
-        }
-    }
-
-    bool RedisSummaryAdapter::createRedisTableIndex()
-    {
-        domain::Status status = connectToRedis();
-        if (!status.isOk())
-        {
-            return false; // 如果無法連接，返回錯誤
-        }
-
-        try
-        {
-            redisReply *reply = (redisReply *)redisCommand(redisContext_,
-                                                           "FT.CREATE outputIdx ON JSON PREFIX 1 summary: SCHEMA "
-                                                           "$.stock_id AS stock_id TEXT "
-                                                           "$.area_center AS area_center TEXT "
-                                                           "$.belong_branches.* AS branches TAG");
-
-            std::string response = reply ? reply->str : "";
-
-            domain::Status status = reply && reply->type != REDIS_REPLY_ERROR
-                                        ? domain::Status::ok()
-                                              .withOperation("createRedisTableIndex")
-                                              .withResponse(response)
-                                        : domain::Status::error(domain::Status::Code::RedisError, reply ? reply->str : "no reply")
-                                              .withOperation("createRedisTableIndex")
-                                              .withResponse(response);
-
-            if (reply)
-                freeReplyObject(reply);
-
-            if (!status.isOk())
-            {
-                LOG_F(ERROR, "%s", status.toString().c_str());
-            }
-            else
-            {
-                LOG_F(INFO, "%s", status.toString().c_str());
-            }
-
-            return status.isOk();
-        }
-        catch (const std::exception &ex)
-        {
-            auto status = domain::Status::error(domain::Status::Code::RedisError, ex.what())
-                              .withOperation("createRedisTableIndex");
-            LOG_F(ERROR, "%s", status.toString().c_str());
-            return false;
-        }
-    }
-
-    domain::SummaryData *RedisSummaryAdapter::getData(const std::string &key)
-    {
-        std::lock_guard<std::mutex> lock(cacheMutex_);
-        auto it = summaryCache_.find(key);
-        if (it != summaryCache_.end())
-        {
-            return &it->second;
-        }
-        return nullptr;
     }
 } // namespace finance::infrastructure::storage

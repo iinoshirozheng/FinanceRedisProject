@@ -32,7 +32,7 @@ int main(int argc, char *argv[])
 
         // Create and initialize service
         auto service = application::FinanceService();
-        if (!service.initialize().isOk())
+        if (!service.initialize().is_ok())
         {
             LOG_F(ERROR, "Failed to initialize service");
             return 1;
