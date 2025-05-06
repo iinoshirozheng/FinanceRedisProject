@@ -16,7 +16,7 @@ namespace finance::domain
         explicit ResultError(const std::string &msg) : message(msg) {}
         friend std::ostream &operator<<(std::ostream &os, const ResultError &err)
         {
-            return os << "ResultError: " << err.message;
+            return os << std::string("ResultError: ") << err.message;
         }
     };
 

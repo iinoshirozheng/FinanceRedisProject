@@ -43,7 +43,7 @@ namespace finance::application
 
     private:
         std::shared_ptr<infrastructure::storage::RedisSummaryAdapter> repository_;
-        std::unique_ptr<infrastructure::network::PacketProcessorFactory> packetHandler_;
+        std::shared_ptr<infrastructure::network::PacketProcessorFactory> packetHandler_;
         std::unique_ptr<infrastructure::network::TcpServiceAdapter> tcpService_;
 
         std::atomic<int> signalStatus_{0};

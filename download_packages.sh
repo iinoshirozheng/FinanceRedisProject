@@ -3,121 +3,210 @@
 # Exit on error
 set -e
 
-# Create lib directory if it doesn't exist
-mkdir -p lib
-cd lib
+# Get script directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# Link to Homebrew's hiredis installation
-link_hiredis() {
-    if [ ! -d "hiredis" ]; then
-        echo "Creating symbolic link to Homebrew's hiredis..."
-        
-        # Check if Homebrew is installed
-        if ! command -v brew &> /dev/null; then
-            echo "Homebrew is not installed. Skipping hiredis linking."
-            return 1
+# Create directories
+Create_dir() {
+    if [ -d "${SCRIPT_DIR}/third_party_" ]; then
+        echo "Removing existing third_party_ directory..."
+        rm -rf "${SCRIPT_DIR}/third_party_"
+    fi
+    if [ -d "${SCRIPT_DIR}/third_party" ]; then
+        echo "Removing existing third_party directory..."
+        rm -rf "${SCRIPT_DIR}/third_party"
+    fi
+    mkdir -p "${SCRIPT_DIR}/third_party_"
+    mkdir -p "${SCRIPT_DIR}/third_party"
+    cd "${SCRIPT_DIR}/third_party_"
+
+    # Initialize CMake file
+    cat > "${SCRIPT_DIR}/third_party/LinkThirdparty.cmake" << 'EOL'
+function(LinkThirdparty target_name)
+    message(STATUS "LinkThirdparty module invoked for target '${target_name}'")
+    message(STATUS "Thirdparty Directory: ${THIRD_PARTY_DIR}")
+
+    # 驗證 THIRD_PARTY_DIR 是否存在
+    if(NOT EXISTS "${THIRD_PARTY_DIR}")
+        message(FATAL_ERROR "Thirdparty directory '${THIRD_PARTY_DIR}' does not exist!")
+    endif()
+EOL
+}
+
+clean_build() {
+    if [ -d "${SCRIPT_DIR}/third_party_" ]; then
+        echo "Cleaning third_party_ directory..."
+        rm -rf "${SCRIPT_DIR}/third_party_"
+    fi
+
+    # Close CMake function
+    cat >> "${SCRIPT_DIR}/third_party/LinkThirdparty.cmake" << 'EOL'
+endfunction()
+EOL
+}
+
+# Update and clean repo
+update_repo() {
+    local repo_dir=$1
+    if [ -d "$repo_dir" ]; then
+        echo "Updating $repo_dir..."
+        cd "$repo_dir"
+        git pull
+        if [ -d "build" ]; then
+            echo "Cleaning build directory..."
+            rm -rf build
         fi
-        
-        # Find hiredis installation directory
-        HIREDIS_DIR=$(brew --prefix hiredis 2>/dev/null || echo "")
-        
-        if [ -z "$HIREDIS_DIR" ] || [ ! -d "$HIREDIS_DIR" ]; then
-            echo "hiredis is not installed via Homebrew. Run 'brew install hiredis' to install it."
-            return 1
-        fi
-        
-        # Create symbolic link
-        ln -sf "$HIREDIS_DIR" hiredis
-        echo "Symbolic link to hiredis created successfully at $(pwd)/hiredis -> $HIREDIS_DIR"
-    else
-        echo "hiredis link already exists, skipping..."
+        cd ..
     fi
 }
 
-# Download nlohmann json
+# Clone and build hiredis
+clone_hiredis() {
+    if [ ! -d "hiredis" ]; then
+        echo "Cloning hiredis..."
+        git clone https://github.com/redis/hiredis.git
+    else
+        update_repo "hiredis"
+    fi
+    
+    cd hiredis
+    make -j$(sysctl -n hw.ncpu)
+    make PREFIX="${SCRIPT_DIR}/third_party/hiredis" install
+    cd ..
+
+    # Add hiredis CMake configuration
+    cat >> "${SCRIPT_DIR}/third_party/LinkThirdparty.cmake" << 'EOL'
+
+    # === Hiredis ===
+    if(LINK_HIREDIS)
+        message(STATUS "Linking hiredis (static)...")
+        target_include_directories(${target_name} PRIVATE ${THIRD_PARTY_DIR}/hiredis/include)
+        target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/hiredis/lib/libhiredis.a)
+    endif()
+EOL
+}
+
+# Clone nlohmann json (header-only)
 clone_nlohmann_json() {
     if [ ! -d "nlohmann_json" ]; then
         echo "Cloning nlohmann/json..."
         git clone https://github.com/nlohmann/json.git nlohmann_json
     else
-        echo "nlohmann/json already exists, skipping..."
+        update_repo "nlohmann_json"
     fi
+    
+    mkdir -p "${SCRIPT_DIR}/third_party/nlohmann"
+    cp -r nlohmann_json/single_include/nlohmann "${SCRIPT_DIR}/third_party/"
+
+    # Add nlohmann/json CMake configuration
+    cat >> "${SCRIPT_DIR}/third_party/LinkThirdparty.cmake" << 'EOL'
+
+    # === nlohmann/json (Header-only) ===
+    if(LINK_NLOHMANN_JSON)
+        message(STATUS "Adding nlohmann/json support...")
+        target_include_directories(${target_name} PRIVATE ${THIRD_PARTY_DIR})
+    endif()
+EOL
 }
 
-# Download loguru
+# Clone loguru (header-only)
 clone_loguru() {
     if [ ! -d "loguru" ]; then
         echo "Cloning loguru..."
         git clone https://github.com/emilk/loguru.git
     else
-        echo "loguru already exists, skipping..."
+        update_repo "loguru"
     fi
+    
+    mkdir -p "${SCRIPT_DIR}/third_party/loguru"
+    cp -r loguru/loguru.hpp "${SCRIPT_DIR}/third_party/loguru"
+    cp -r loguru/loguru.cpp "${SCRIPT_DIR}/third_party/loguru"
+
+    # Add loguru CMake configuration
+    cat >> "${SCRIPT_DIR}/third_party/LinkThirdparty.cmake" << 'EOL'
+
+    # === Loguru (Header-only) ===
+    if(LINK_LOGURU)
+        message(STATUS "Using Loguru for logging...")
+        target_sources(${target_name} PRIVATE ${THIRD_PARTY_DIR}/loguru/loguru.cpp)
+        target_include_directories(${target_name} PRIVATE ${THIRD_PARTY_DIR}/loguru)
+    endif()
+EOL
 }
 
-# Link to Homebrew's Poco installation
-link_poco() {
+# Clone and build Poco
+clone_poco() {
     if [ ! -d "poco" ]; then
-        echo "Creating symbolic link to Homebrew's Poco..."
-        
-        # Check if Homebrew is installed
-        if ! command -v brew &> /dev/null; then
-            echo "Homebrew is not installed. Skipping Poco linking."
-            return 1
-        fi
-        
-        # Find Poco installation directory
-        POCO_DIR=$(brew --prefix poco 2>/dev/null || echo "")
-        
-        if [ -z "$POCO_DIR" ] || [ ! -d "$POCO_DIR" ]; then
-            echo "Poco is not installed via Homebrew. Run 'brew install poco' to install it."
-            return 1
-        fi
-        
-        # Create symbolic link
-        ln -sf "$POCO_DIR" poco
-        echo "Symbolic link to Poco created successfully at $(pwd)/poco -> $POCO_DIR"
+        echo "Cloning Poco..."
+        git clone https://github.com/pocoproject/poco.git
     else
-        echo "Poco link already exists, skipping..."
+        update_repo "poco"
     fi
-}
+    
+    cd poco
+    mkdir cmake-build && cd cmake-build
+    cmake -DCMAKE_INSTALL_PREFIX="${SCRIPT_DIR}/third_party/poco" \
+          -DENABLE_TESTS=OFF \
+          -DENABLE_SAMPLES=OFF \
+          -DBUILD_SHARED_LIBS=OFF \
+          -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+          ..
+    make -j$(sysctl -n hw.ncpu)
+    make install
+    cd ../../..
 
-# Link to Homebrew's Boost installation
-link_boost() {
-    if [ ! -d "boost" ]; then
-        echo "Creating symbolic link to Homebrew's Boost..."
-        
-        # Check if Homebrew is installed
-        if ! command -v brew &> /dev/null; then
-            echo "Homebrew is not installed. Skipping Boost linking."
-            return 1
-        fi
-        
-        # Find Boost installation directory
-        BOOST_DIR=$(brew --prefix boost 2>/dev/null || echo "")
-        
-        if [ -z "$BOOST_DIR" ] || [ ! -d "$BOOST_DIR" ]; then
-            echo "Boost is not installed via Homebrew. Run 'brew install boost' to install it."
-            return 1
-        fi
-        
-        # Create symbolic link
-        ln -sf "$BOOST_DIR" boost
-        echo "Symbolic link to Boost created successfully at $(pwd)/boost -> $BOOST_DIR"
-    else
-        echo "Boost link already exists, skipping..."
-    fi
+    # Add Poco CMake configuration
+    cat >> "${SCRIPT_DIR}/third_party/LinkThirdparty.cmake" << 'EOL'
+
+    # === Poco ===
+    if(LINK_POCO)
+        message(STATUS "Linking Poco libraries (static)...")
+
+        # 注意依賴順序由上往下
+        set(PocoModules
+            Net
+            JSON
+            Util
+            XML
+            Crypto
+            Data
+            Encodings
+            Foundation
+        )
+
+        set(DETECTED_POCO_MODULES "")
+        foreach(module ${PocoModules})
+            if(EXISTS "${THIRD_PARTY_DIR}/poco/lib/libPoco${module}.a")
+                list(APPEND DETECTED_POCO_MODULES ${module})
+            endif()
+        endforeach()
+
+        message(STATUS "Detected Poco Modules (ordered): ${DETECTED_POCO_MODULES}")
+        target_include_directories(${target_name} PRIVATE ${THIRD_PARTY_DIR}/poco/include)
+
+        foreach(module ${DETECTED_POCO_MODULES})
+            target_link_libraries(${target_name} PRIVATE "${THIRD_PARTY_DIR}/poco/lib/libPoco${module}.a")
+            message(STATUS "Linked Poco${module} (static)")
+        endforeach()
+
+        target_link_libraries(${target_name} PRIVATE pthread dl)
+    endif()
+EOL
 }
 
 # Main function
 main() {
-    # Link and clone dependencies
-    link_hiredis
+    Create_dir
+
+    # Clone and build all dependencies
+    clone_hiredis
     clone_nlohmann_json
     clone_loguru
-    link_poco
-    link_boost
+    clone_poco
     
-    echo "All dependencies successfully linked or downloaded in lib directory!"
+    clean_build
+
+    echo "All dependencies successfully built and installed to ${SCRIPT_DIR}/third_party/{package_name}!"
 }
 
 # Execute main function

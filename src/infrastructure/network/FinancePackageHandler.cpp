@@ -19,6 +19,13 @@ namespace finance::infrastructure::network
         handlers_.emplace("ELD002", std::make_unique<Hcrtm05pHandler>());
     }
 
+    PacketProcessorFactory::PacketProcessorFactory(std::shared_ptr<storage::RedisSummaryAdapter> repository)
+        : repository_(std::move(repository))
+    {
+        handlers_.emplace("ELD001", std::make_unique<Hcrtm01Handler>());
+        handlers_.emplace("ELD002", std::make_unique<Hcrtm05pHandler>());
+    }
+
     domain::IPackageHandler *
     PacketProcessorFactory::getProcessorHandler(const std::string_view &tcode) const
     {
@@ -113,7 +120,7 @@ namespace finance::infrastructure::network
 
         LOG_CTX(std::string_view(h.stock_id, sizeof(h.stock_id)),
                 s.stock_id, s.area_center, INFO,
-                "margin_avail_qty=%ld", s.margin_available_qty);
+                "margin_avail_qty=%lld", s.margin_available_qty);
 
         return Result<SummaryData>::Ok(std::move(s));
     }
@@ -139,7 +146,7 @@ namespace finance::infrastructure::network
 
         LOG_CTX(std::string_view(h.stock_id, sizeof(h.stock_id)),
                 s.stock_id, s.area_center, INFO,
-                "margin_avail_qty=%ld", s.margin_available_qty);
+                "margin_avail_qty=%lld", s.margin_available_qty);
 
         return Result<SummaryData>::Ok(std::move(s));
     }

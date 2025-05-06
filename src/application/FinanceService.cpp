@@ -16,7 +16,7 @@ namespace finance::application
 
     FinanceService::FinanceService()
         : repository_(std::make_shared<infrastructure::storage::RedisSummaryAdapter>()),
-          packetHandler_(std::make_unique<infrastructure::network::PacketProcessorFactory>(repository_))
+          packetHandler_(std::make_shared<infrastructure::network::PacketProcessorFactory>(repository_))
     {
     }
 

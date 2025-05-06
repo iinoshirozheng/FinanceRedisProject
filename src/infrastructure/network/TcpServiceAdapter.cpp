@@ -1,12 +1,78 @@
 // infrastructure/network/TcpServiceAdapter.cpp
 #include "TcpServiceAdapter.h"
 #include <loguru.hpp>
+#include <Poco/Net/StreamSocket.h>
 
 namespace finance::infrastructure::network
 {
     using domain::Result;
     using domain::ResultError;
     using utils::FinanceUtils;
+
+    TcpServiceAdapter::~TcpServiceAdapter()
+    {
+        stop();
+    }
+
+    bool TcpServiceAdapter::start()
+    {
+        if (running_)
+            return false;
+
+        running_ = true;
+        acceptThread_ = std::thread(&TcpServiceAdapter::producer, this);
+        processingThread_ = std::thread(&TcpServiceAdapter::consumer, this);
+        return true;
+    }
+
+    void TcpServiceAdapter::stop()
+    {
+        if (!running_)
+            return;
+
+        running_ = false;
+        if (acceptThread_.joinable())
+            acceptThread_.join();
+        if (processingThread_.joinable())
+            processingThread_.join();
+    }
+
+    void TcpServiceAdapter::producer()
+    {
+        Poco::Net::StreamSocket clientSocket;
+        std::vector<char> buffer(RING_BUFFER_SIZE);
+
+        while (running_)
+        {
+            try
+            {
+                clientSocket = serverSocket_.acceptConnection();
+                clientSocket.setReceiveTimeout(Poco::Timespan(SOCKET_TIMEOUT_MS * 1000));
+
+                while (running_)
+                {
+                    int n = clientSocket.receiveBytes(buffer.data(), buffer.size());
+                    if (n <= 0)
+                        break;
+
+                    size_t maxLen;
+                    char *writePtr = ringBuffer_.writablePtr(maxLen);
+                    if (static_cast<size_t>(n) > maxLen)
+                    {
+                        LOG_F(ERROR, "Buffer overflow: received %d bytes but only %zu available", n, maxLen);
+                        break;
+                    }
+                    std::memcpy(writePtr, buffer.data(), n);
+                    ringBuffer_.enqueue(n);
+                }
+            }
+            catch (const Poco::Exception &e)
+            {
+                if (running_)
+                    LOG_F(ERROR, "Socket error: %s", e.displayText().c_str());
+            }
+        }
+    }
 
     void TcpServiceAdapter::consumer()
     {
@@ -18,7 +84,7 @@ namespace finance::infrastructure::network
             auto segOpt = ringBuffer_.getNextPacket();
             if (!segOpt)
             {
-                cpu_pause();
+                std::this_thread::yield();
                 continue;
             }
             auto seg = *segOpt;
