@@ -70,6 +70,13 @@ option(LINK_NLOHMANN_JSON "啟用 nlohmann/json 支援" ON)
 EOL
     fi
 
+    # Check if redis-plus-plus was cloned
+    if [ -d "${SCRIPT_DIR}/third_party/redis-plus-plus" ]; then
+        cat >> "${SCRIPT_DIR}/CMakeLists.txt" << EOL
+option(LINK_REDIS_PLUS_PLUS "啟用 redis-plus-plus 的靜態連結" ON)
+EOL
+    fi
+
     # Add status messages for enabled options
     cat >> "${SCRIPT_DIR}/CMakeLists.txt" << EOL
 
@@ -97,6 +104,12 @@ EOL
     if [ -d "${SCRIPT_DIR}/third_party/nlohmann" ]; then
         cat >> "${SCRIPT_DIR}/CMakeLists.txt" << EOL
 message(STATUS " LINK_NLOHMANN_JSON: \${LINK_NLOHMANN_JSON}")
+EOL
+    fi
+
+    if [ -d "${SCRIPT_DIR}/third_party/redis-plus-plus" ]; then
+        cat >> "${SCRIPT_DIR}/CMakeLists.txt" << EOL
+message(STATUS " LINK_REDIS_PLUS_PLUS: \${LINK_REDIS_PLUS_PLUS}")
 EOL
     fi
 }

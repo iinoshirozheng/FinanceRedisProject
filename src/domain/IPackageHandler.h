@@ -2,7 +2,7 @@
 
 #include "./FinanceDataStructure.h"
 #include "./Result.hpp"
-#include "./Error.hpp"
+
 namespace finance::domain
 {
     // 通用數據處理器介面，基於模板的方式

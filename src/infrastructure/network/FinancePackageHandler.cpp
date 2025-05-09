@@ -7,8 +7,8 @@
 
 namespace finance::infrastructure::network
 {
-    using domain::Error;
     using domain::ErrorCode;
+    using domain::ErrorResult;
     using domain::Result;
     using utils::FinanceUtils;
     namespace config = finance::infrastructure::config;
@@ -26,19 +26,17 @@ namespace finance::infrastructure::network
         handlers_.emplace("ELD002", std::make_unique<Hcrtm05pHandler>());
     }
 
-    domain::IPackageHandler *
-    PacketProcessorFactory::getProcessorHandler(const std::string_view &tcode) const
+    domain::IPackageHandler *PacketProcessorFactory::getProcessorHandler(const std::string_view &tcode) const
     {
         auto it = handlers_.find(tcode);
         return it != handlers_.end() ? it->second.get() : nullptr;
     }
 
-    Result<SummaryData>
-    PacketProcessorFactory::processData(const domain::ApData &ap_data)
+    Result<SummaryData> PacketProcessorFactory::processData(const domain::ApData &ap_data)
     {
         char et = ap_data.entry_type[0];
         if (et != 'A' && et != 'C')
-            return Result<SummaryData>::Err({ErrorCode::InvalidPacket, "Invalid entry type"});
+            return Result<SummaryData, ErrorResult>::Err(ErrorResult{ErrorCode::InvalidPacket, "Invalid entry type"});
 
         // 由 ap_data 反推父結構，讀取 t_code
         auto pkg = reinterpret_cast<const domain::FinancePackageMessage *>(
@@ -51,7 +49,7 @@ namespace finance::infrastructure::network
         if (!handler)
         {
             LOG_F(WARNING, "找不到處理器 t_code=%.*s", int(tcode.size()), tcode.data());
-            return Result<SummaryData>::Err({ErrorCode::UnknownTransactionCode, "Unknown t_code"});
+            return Result<SummaryData, ErrorResult>::Err(ErrorResult{ErrorCode::UnknownTransactionCode, "Unknown t_code"});
         }
 
         auto result = static_cast<Hcrtm01Handler *>(handler)->processData(ap_data);
@@ -67,7 +65,7 @@ namespace finance::infrastructure::network
         // 僅處理符合系統的 area_center
         if (std::string_view(h.area_center, sizeof(h.area_center)) != std::string_view(ap_data.system, sizeof(ap_data.system)))
         {
-            return Result<SummaryData>::Err({ErrorCode::InvalidPacket, "Invalid area center"});
+            return Result<SummaryData, ErrorResult>::Err(ErrorResult{ErrorCode::InvalidPacket, "Invalid area center"});
         }
 
         // 一次 BCD→int 轉換
@@ -122,7 +120,7 @@ namespace finance::infrastructure::network
                 s.stock_id, s.area_center, INFO,
                 "margin_avail_qty=%lld", s.margin_available_qty);
 
-        return Result<SummaryData>::Ok(std::move(s));
+        return Result<SummaryData, ErrorResult>::Ok(std::move(s));
     }
 
     Result<SummaryData>
@@ -148,6 +146,6 @@ namespace finance::infrastructure::network
                 s.stock_id, s.area_center, INFO,
                 "margin_avail_qty=%lld", s.margin_available_qty);
 
-        return Result<SummaryData>::Ok(std::move(s));
+        return Result<SummaryData, ErrorResult>::Ok(std::move(s));
     }
 }

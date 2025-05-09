@@ -194,6 +194,48 @@ clone_poco() {
 EOL
 }
 
+# Clone and build redis-plus-plus
+clone_redis_plus_plus() {
+    if [ ! -d "redis-plus-plus" ]; then
+        echo "Cloning redis-plus-plus..."
+        git clone https://github.com/sewenew/redis-plus-plus.git
+    else
+        update_repo "redis-plus-plus"
+    fi
+    
+    cd redis-plus-plus
+    mkdir -p build && cd build
+    cmake -DCMAKE_INSTALL_PREFIX="${SCRIPT_DIR}/third_party/redis-plus-plus" \
+          -DCMAKE_PREFIX_PATH="${SCRIPT_DIR}/third_party/hiredis" \
+          -DREDIS_PLUS_PLUS_CXX_STANDARD=17 \
+          -DREDIS_PLUS_PLUS_BUILD_TEST=OFF \
+          -DREDIS_PLUS_PLUS_BUILD_SHARED=OFF \
+          -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+          -DCMAKE_BUILD_TYPE=Release \
+          ..
+    make -j$(sysctl -n hw.ncpu)
+    make install
+    cd ../../
+    rm -rf redis-plus-plus
+
+    # Add redis-plus-plus CMake configuration
+    cat >> "${SCRIPT_DIR}/third_party/LinkThirdparty.cmake" << 'EOL'
+
+    # === redis-plus-plus ===
+    if(LINK_REDIS_PLUS_PLUS)
+        message(STATUS "Linking redis-plus-plus (static)...")
+        
+        # Make sure hiredis is linked first as it's a dependency
+        if(NOT LINK_HIREDIS)
+            message(FATAL_ERROR "redis-plus-plus requires hiredis, please enable LINK_HIREDIS")
+        endif()
+        
+        target_include_directories(${target_name} PRIVATE ${THIRD_PARTY_DIR}/redis-plus-plus/include)
+        target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/redis-plus-plus/lib/libredis++.a)
+    endif()
+EOL
+}
+
 # Main function
 main() {
     Create_dir
@@ -203,6 +245,7 @@ main() {
     clone_nlohmann_json
     clone_loguru
     clone_poco
+    clone_redis_plus_plus
     
     clean_build
 

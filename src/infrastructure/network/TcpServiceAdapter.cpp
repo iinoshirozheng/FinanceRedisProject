@@ -5,8 +5,8 @@
 
 namespace finance::infrastructure::network
 {
+    using domain::ErrorResult;
     using domain::Result;
-    using domain::ResultError;
     using utils::FinanceUtils;
 
     TcpServiceAdapter::~TcpServiceAdapter()

@@ -23,12 +23,14 @@ option(LINK_HIREDIS "啟用 hiredis 的靜態連結" ON)
 option(LINK_POCO "啟用 Poco 的靜態連結" ON)
 option(LINK_LOGURU "啟用 Loguru 日誌記錄器" ON)
 option(LINK_NLOHMANN_JSON "啟用 nlohmann/json 支援" ON)
+option(LINK_REDIS_PLUS_PLUS "啟用 redis-plus-plus 的靜態連結" ON)
 
 message(STATUS "靜態連結選項:")
 message(STATUS " LINK_HIREDIS: ${LINK_HIREDIS}")
 message(STATUS " LINK_POCO: ${LINK_POCO}")
 message(STATUS " LINK_LOGURU: ${LINK_LOGURU}")
 message(STATUS " LINK_NLOHMANN_JSON: ${LINK_NLOHMANN_JSON}")
+message(STATUS " LINK_REDIS_PLUS_PLUS: ${LINK_REDIS_PLUS_PLUS}")
 
 # 掃描源碼
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/*.cpp)

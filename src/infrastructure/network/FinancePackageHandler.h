@@ -6,7 +6,6 @@
 #include "../../utils/FinanceUtils.hpp"
 #include "../config/AreaBranchProvider.hpp"
 #include "../../domain/IPackageHandler.h"
-#include "../../domain/Error.hpp"
 #include "../storage/RedisSummaryAdapter.h"
 
 #include <string_view>
@@ -15,7 +14,7 @@
 
 namespace finance::infrastructure::network
 {
-    using finance::domain::Error;
+    using finance::domain::ErrorResult;
     using finance::domain::IPackageHandler;
     using finance::domain::Result;
     using finance::domain::SummaryData;
@@ -33,13 +32,13 @@ namespace finance::infrastructure::network
         Result<SummaryData> processData(const domain::ApData &ap_data) override;
     };
 
-    class PacketProcessorFactory
+    class PacketProcessorFactory : public domain::IPackageHandler
     {
     public:
         PacketProcessorFactory();
         explicit PacketProcessorFactory(std::shared_ptr<RedisSummaryAdapter> repository);
         IPackageHandler *getProcessorHandler(const std::string_view &tcode) const;
-        Result<SummaryData> processData(const domain::ApData &ap_data);
+        Result<SummaryData> processData(const domain::ApData &ap_data) override;
 
     private:
         std::unordered_map<std::string_view, std::unique_ptr<IPackageHandler>> handlers_;

@@ -1,122 +1,159 @@
-// RedisSummaryAdapter.cpp
 #include "RedisSummaryAdapter.h"
-#include "RedisClient.hpp"
 #include <loguru.hpp>
+#include "../config/ConnectionConfigProvider.hpp"
+#include "../../domain/Result.hpp"
 
 namespace finance::infrastructure::storage
 {
+    using finance::domain::ErrorCode;
+    using finance::domain::ErrorResult;
     using finance::domain::Result;
 
-    Result<void, ResultError> RedisSummaryAdapter::init()
+    /**
+     * @brief 初始化 Redis 連接
+     */
+    Result<void, ErrorResult> RedisSummaryAdapter::init()
     {
-        if (ctx_)
-            return Result<void, ResultError>::Ok();
-
-        auto conn = connect_redis(
-            config::ConnectionConfigProvider::redisUrl(),
-            config::ConnectionConfigProvider::serverPort());
-        if (conn.is_err())
-            return Result<void, ResultError>::Err(conn.unwrap_err());
-
-        ctx_ = std::move(conn.unwrap());
-        return Result<void, ResultError>::Ok();
-    }
-
-    Result<void, ResultError> RedisSummaryAdapter::sync(const SummaryData &data)
-    {
-        // Lazy init
-        if (!ctx_)
+        // 如果 Redis 客戶端已經初始化，直接返回成功
+        if (redisClient_)
         {
-            auto r = init();
-            if (r.is_err())
-                return r;
+            return Result<void, ErrorResult>::Ok();
         }
 
-        // 序列化
-        auto jres = toJson(data);
-        if (jres.is_err())
-            return Result<void, ResultError>::Err(jres.unwrap_err());
+        // Redis 連接初始化
+        auto redis = std::make_unique<RedisPlusPlusClient<std::string>>();
+        const std::string uri = config::ConnectionConfigProvider::redisUri();
 
-        // 寫 Redis
-        std::string key = makeKey(data);
-        auto setRes = redis_set(ctx_.get(), key, jres.unwrap());
-        if (setRes.is_err())
-            return setRes;
-
-        // 更新本地快取
+        // Use direct success/failure checks instead of match
+        auto connectResult = redis->connect(uri);
+        if (connectResult.is_ok())
         {
-            std::unique_lock lock(cacheMutex_);
-            cache_[key] = data;
+            redisClient_ = std::move(redis);
+            return Result<void, ErrorResult>::Ok();
         }
-        return Result<void, ResultError>::Ok();
+        else
+        {
+            const auto &err = connectResult.unwrap_err();
+            return Result<void, ErrorResult>::Err(
+                ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 連線失敗: " + err.message});
+        }
     }
 
-    Result<SummaryData, ResultError> RedisSummaryAdapter::get(const std::string &key)
+    /**
+     * @brief 序列化並同步資料到 Redis，同時更新本地緩存。
+     */
+    Result<void, ErrorResult> RedisSummaryAdapter::sync(const SummaryData &data)
     {
+        // 如果尚未初始化 Redis，則嘗試初始化
+        if (!redisClient_)
+        {
+            auto initResult = init();
+            if (initResult.is_err())
+            {
+                return Result<void, ErrorResult>::Err(
+                    ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 重新連線失敗: " + initResult.unwrap_err().message});
+            }
+        }
+
+        const std::string key = makeKey(data);
+
+        // 使用命令式風格：序列化 -> 保存到 Redis -> 更新本地緩存
+        auto jsonResult = toJson(data);
+        if (jsonResult.is_err())
+        {
+            return Result<void, ErrorResult>::Err(jsonResult.unwrap_err());
+        }
+
+        auto setResult = redisClient_->set(key, jsonResult.unwrap());
+        if (setResult.is_err())
+        {
+            return Result<void, ErrorResult>::Err(setResult.unwrap_err());
+        }
+
+        // 更新本地緩存
+        std::unique_lock lock(cacheMutex_);
+        cache_[key] = data;
+        return Result<void, ErrorResult>::Ok();
+    }
+
+    /**
+     * @brief 從本地緩存或 Redis 中取得資料。
+     */
+    Result<SummaryData, ErrorResult> RedisSummaryAdapter::get(const std::string &key)
+    {
+        // 如果尚未初始化 Redis，則嘗試初始化
+        if (!redisClient_)
+        {
+            auto initResult = init();
+            if (initResult.is_err())
+            {
+                return Result<SummaryData, ErrorResult>::Err(
+                    ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 重新連線失敗: " + initResult.unwrap_err().message});
+            }
+        }
+
+        // 從本地緩存中查詢資料
         {
             std::shared_lock lock(cacheMutex_);
             if (auto it = cache_.find(key); it != cache_.end())
-                return Result<SummaryData, ResultError>::Ok(it->second);
+            {
+                return Result<SummaryData, ErrorResult>::Ok(it->second); // 如果快取中有資料，直接返回
+            }
         }
 
-        // 本地無，從 Redis 讀取
-        auto jres = getJson(key);
-        if (jres.is_err())
-            return Result<SummaryData, ResultError>::Err(jres.unwrap_err());
+        // 使用命令式風格：從 Redis 獲取 -> 反序列化 -> 更新緩存
+        auto jsonResult = redisClient_->get(key);
+        if (jsonResult.is_err())
+        {
+            return Result<SummaryData, ErrorResult>::Err(jsonResult.unwrap_err());
+        }
 
-        auto deser = fromJson(jres.unwrap());
-        if (deser.is_err())
-            return deser;
+        auto dataResult = fromJson(jsonResult.unwrap());
+        if (dataResult.is_err())
+        {
+            return Result<SummaryData, ErrorResult>::Err(dataResult.unwrap_err());
+        }
 
-        // 更新快取
+        // 更新緩存
         {
             std::unique_lock lock(cacheMutex_);
-            cache_[key] = deser.unwrap();
+            cache_[key] = dataResult.unwrap();
         }
-        return deser;
+
+        return dataResult;
     }
 
-    Result<void, ResultError> RedisSummaryAdapter::remove(const std::string &key)
+    /**
+     * @brief 從 Redis 加載所有符合模式的資料到本地緩存。
+     */
+    Result<void, ErrorResult> RedisSummaryAdapter::loadAll()
     {
-        if (!ctx_)
+        // 如果尚未初始化 Redis，則嘗試初始化
+        if (!redisClient_)
         {
-            auto r = init();
-            if (r.is_err())
-                return r;
+            auto initResult = init();
+            if (initResult.is_err())
+            {
+                return Result<void, ErrorResult>::Err(
+                    ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 重新連線失敗: " + initResult.unwrap_err().message});
+            }
         }
 
-        auto delRes = redis_del(ctx_.get(), key);
-        if (delRes.is_err())
-            return delRes;
-
-        {
-            std::unique_lock lock(cacheMutex_);
-            cache_.erase(key);
-        }
-        return Result<void, ResultError>::Ok();
-    }
-
-    Result<void, ResultError> RedisSummaryAdapter::loadAll()
-    {
-        if (!ctx_)
-        {
-            auto r = init();
-            if (r.is_err())
-                return r;
-        }
-
-        // 取所有 key
-        auto keysRes = getKeys(std::string(KEY_PREFIX) + ":*");
+        // 使用 Redis KEYS 指令獲取所有符合模式的 Key
+        const std::string pattern = KEY_PREFIX + ":*";
+        auto keysRes = redisClient_->keys(pattern);
         if (keysRes.is_err())
-            return Result<void, ResultError>::Err(keysRes.unwrap_err());
+        {
+            return Result<void, ErrorResult>::Err(keysRes.unwrap_err());
+        }
 
-        // 清快取並重載
+        // 清理本地緩存並加載新資料
         {
             std::unique_lock lock(cacheMutex_);
             cache_.clear();
         }
 
-        for (auto &key : keysRes.unwrap())
+        for (const auto &key : keysRes.unwrap())
         {
             auto gre = get(key);
             if (gre.is_ok())
@@ -126,98 +163,107 @@ namespace finance::infrastructure::storage
             }
             else
             {
-                LOG_F(WARNING, "Redis loadAll: key=%s failed: %s",
+                LOG_F(WARNING, "載入 Key '%s' 從 Redis 失敗: %s.",
                       key.c_str(), gre.unwrap_err().message.c_str());
             }
         }
-        return Result<void, ResultError>::Ok();
+
+        LOG_F(INFO, "已從 Redis 載入 %zu 筆 summary 資料。", cache_.size());
+        return Result<void, ErrorResult>::Ok();
     }
 
-    std::unordered_map<std::string, SummaryData> RedisSummaryAdapter::getAll() const
-    {
-        std::shared_lock lock(cacheMutex_);
-        return cache_;
-    }
+    // 以下為輔助函數
 
-    // private helpers
-
-    Result<std::vector<std::string>, ResultError> RedisSummaryAdapter::getKeys(const std::string &pattern)
-    {
-        redisReply *r = static_cast<redisReply *>(
-            redisCommand(ctx_.get(), "KEYS %s", pattern.c_str()));
-        if (!r)
-            return Result<std::vector<std::string>, ResultError>::Err(ResultError("KEYS failed"));
-        std::unique_ptr<redisReply, decltype(&freeReplyObject)> guard(r, freeReplyObject);
-
-        if (r->type != REDIS_REPLY_ARRAY)
-            return Result<std::vector<std::string>, ResultError>::Err(ResultError("KEYS unexpected reply"));
-
-        std::vector<std::string> result;
-        for (size_t i = 0; i < r->elements; ++i)
-            result.emplace_back(r->element[i]->str);
-        return Result<std::vector<std::string>, ResultError>::Ok(result);
-    }
-
-    Result<std::string, ResultError> RedisSummaryAdapter::getJson(const std::string &key)
-    {
-        // 目前僅支援 JSON.GET
-        redisReply *r = static_cast<redisReply *>(
-            redisCommand(ctx_.get(), "JSON.GET %s", key.c_str()));
-        if (!r)
-            return Result<std::string, ResultError>::Err(ResultError("JSON.GET failed"));
-        std::unique_ptr<redisReply, decltype(&freeReplyObject)> guard(r, freeReplyObject);
-
-        if (r->type != REDIS_REPLY_STRING)
-            return Result<std::string, ResultError>::Err(ResultError("JSON.GET unexpected reply"));
-        return Result<std::string, ResultError>::Ok(std::string(r->str));
-    }
-
-    Result<std::string, ResultError> RedisSummaryAdapter::toJson(const SummaryData &d)
+    /**
+     * @brief 將 SummaryData 序列化為 JSON 字串。
+     */
+    Result<std::string, ErrorResult> RedisSummaryAdapter::toJson(const SummaryData &data)
     {
         try
         {
             nlohmann::json j;
-            j["stock_id"] = d.stock_id;
-            j["area_center"] = d.area_center;
-            j["margin_available_amount"] = d.margin_available_amount;
-            j["margin_available_qty"] = d.margin_available_qty;
-            j["short_available_amount"] = d.short_available_amount;
-            j["short_available_qty"] = d.short_available_qty;
-            j["after_margin_available_amount"] = d.after_margin_available_amount;
-            j["after_margin_available_qty"] = d.after_margin_available_qty;
-            j["after_short_available_amount"] = d.after_short_available_amount;
-            j["after_short_available_qty"] = d.after_short_available_qty;
-            j["belong_branches"] = d.belong_branches;
-            return Result<std::string, ResultError>::Ok(j.dump());
+            j["stock_id"] = data.stock_id;
+            j["area_center"] = data.area_center;
+            j["margin_available_amount"] = data.margin_available_amount;
+            j["margin_available_qty"] = data.margin_available_qty;
+            j["short_available_amount"] = data.short_available_amount;
+            j["short_available_qty"] = data.short_available_qty;
+            j["after_margin_available_amount"] = data.after_margin_available_amount;
+            j["after_margin_available_qty"] = data.after_margin_available_qty;
+            j["after_short_available_amount"] = data.after_short_available_amount;
+            j["after_short_available_qty"] = data.after_short_available_qty;
+            j["belong_branches"] = data.belong_branches;
+            return Result<std::string, ErrorResult>::Ok(j.dump());
         }
         catch (const std::exception &ex)
         {
-            return Result<std::string, ResultError>::Err(ResultError(ex.what()));
+            return Result<std::string, ErrorResult>::Err(ErrorResult{ErrorCode::JsonParseError, ex.what()});
         }
     }
 
-    Result<SummaryData, ResultError> RedisSummaryAdapter::fromJson(const std::string &jsonStr)
+    /**
+     * @brief 將 JSON 字串反序列化為 SummaryData。
+     */
+    Result<SummaryData, ErrorResult> RedisSummaryAdapter::fromJson(const std::string &jsonStr)
     {
         try
         {
-            auto j = nlohmann::json::parse(jsonStr);
-            SummaryData d;
-            d.stock_id = j.at("stock_id").get<std::string>();
-            d.area_center = j.at("area_center").get<std::string>();
-            d.margin_available_amount = j.at("margin_available_amount").get<int64_t>();
-            d.margin_available_qty = j.at("margin_available_qty").get<int64_t>();
-            d.short_available_amount = j.at("short_available_amount").get<int64_t>();
-            d.short_available_qty = j.at("short_available_qty").get<int64_t>();
-            d.after_margin_available_amount = j.at("after_margin_available_amount").get<int64_t>();
-            d.after_margin_available_qty = j.at("after_margin_available_qty").get<int64_t>();
-            d.after_short_available_amount = j.at("after_short_available_amount").get<int64_t>();
-            d.after_short_available_qty = j.at("after_short_available_qty").get<int64_t>();
-            d.belong_branches = j.at("belong_branches").get<std::vector<std::string>>();
-            return Result<SummaryData, ResultError>::Ok(std::move(d));
+            nlohmann::json j = nlohmann::json::parse(jsonStr);
+            SummaryData data;
+            data.stock_id = j.at("stock_id").get<std::string>();
+            data.area_center = j.at("area_center").get<std::string>();
+            data.margin_available_amount = j.at("margin_available_amount").get<int64_t>();
+            data.margin_available_qty = j.at("margin_available_qty").get<int64_t>();
+            data.short_available_amount = j.at("short_available_amount").get<int64_t>();
+            data.short_available_qty = j.at("short_available_qty").get<int64_t>();
+            data.after_margin_available_amount = j.at("after_margin_available_amount").get<int64_t>();
+            data.after_margin_available_qty = j.at("after_margin_available_qty").get<int64_t>();
+            data.after_short_available_amount = j.at("after_short_available_amount").get<int64_t>();
+            data.after_short_available_qty = j.at("after_short_available_qty").get<int64_t>();
+            data.belong_branches = j.at("belong_branches").get<std::vector<std::string>>();
+            return Result<SummaryData, ErrorResult>::Ok(data);
         }
         catch (const std::exception &ex)
         {
-            return Result<SummaryData, ResultError>::Err(ResultError(ex.what()));
+            return Result<SummaryData, ErrorResult>::Err(ErrorResult{ErrorCode::JsonParseError, ex.what()});
         }
     }
+
+    /**
+     * @brief 將 SummaryData 的 key 序列化為 Redis key
+     */
+    std::string RedisSummaryAdapter::makeKey(const SummaryData &data)
+    {
+        return KEY_PREFIX + ":" + data.stock_id + ":" + data.area_center;
+    }
+
+    /**
+     * @brief 實現 set 方法
+     */
+    Result<void, ErrorResult> RedisSummaryAdapter::set(const std::string &key)
+    {
+        // This interface method is not used directly, use sync instead
+        return Result<void, ErrorResult>::Err(
+            ErrorResult{ErrorCode::InternalError, "Not implemented: Use sync() instead"});
+    }
+
+    /**
+     * @brief 實現 update 方法
+     */
+    Result<void, ErrorResult> RedisSummaryAdapter::update(const std::string &key)
+    {
+        // This interface method is not used directly, use sync instead
+        return Result<void, ErrorResult>::Err(
+            ErrorResult{ErrorCode::InternalError, "Not implemented: Use sync() instead"});
+    }
+
+    /**
+     * @brief 實現 remove 方法
+     */
+    bool RedisSummaryAdapter::remove(const std::string &key)
+    {
+        // Implementation could delete from cache and Redis if needed
+        return false;
+    }
+
 } // namespace finance::infrastructure::storage

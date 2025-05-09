@@ -54,7 +54,7 @@ namespace finance::infrastructure::config
         }
 
         // 純讀：取得 Redis URL，確保已透過 loadFromFile() 初始化
-        inline static const std::string &redisUrl()
+        inline static const std::string &redisUri()
         {
             return redisUrl_; // e.g. "127.0.0.1:6379"
         }

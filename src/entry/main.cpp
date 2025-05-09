@@ -1,6 +1,8 @@
 #include "../application/FinanceService.h"
 #include "../infrastructure/config/ConnectionConfigProvider.hpp"
 #include "../infrastructure/config/AreaBranchProvider.hpp"
+#include "../infrastructure/storage/RedisSummaryAdapter.h"
+#include "../infrastructure/network/FinancePackageHandler.h"
 #include <loguru.hpp>
 #include <memory>
 #include <string>
@@ -30,8 +32,12 @@ int main(int argc, char *argv[])
             return 1;
         }
 
+        // Create dependencies for the service
+        auto redisRepository = std::make_shared<infrastructure::storage::RedisSummaryAdapter>();
+        auto packetHandler = std::make_shared<infrastructure::network::PacketProcessorFactory>(redisRepository);
+
         // Create and initialize service
-        auto service = application::FinanceService();
+        auto service = application::FinanceService(redisRepository, packetHandler);
         if (!service.initialize().is_ok())
         {
             LOG_F(ERROR, "Failed to initialize service");

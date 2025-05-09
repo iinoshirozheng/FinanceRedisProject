@@ -1,110 +1,105 @@
-// RedisSummaryAdapter.h
 #pragma once
 
 #include "../../domain/Result.hpp"
 #include "../../domain/FinanceDataStructure.h"
 #include "../../utils/FinanceUtils.hpp"
 #include "../config/ConnectionConfigProvider.hpp"
-#include "RedisClient.hpp"
-
-#include <nlohmann/json.hpp>
-#include <shared_mutex>
-#include <unordered_map>
+#include "RedisPlusPlusClient.h"
+#include "../../domain/IFinanceRepository.h"
 #include <string>
-#include <vector>
+#include <unordered_map>
+#include <shared_mutex>
+#include <nlohmann/json.hpp>
+#include <loguru.hpp>
 
 namespace finance::infrastructure::storage
 {
+    using finance::domain::ErrorCode;
+    using finance::domain::ErrorResult;
     using finance::domain::Result;
-    using finance::domain::ResultError;
     using finance::domain::SummaryData;
-    using RedisContextPtr = RedisContextPtr;
 
     /**
-     * @brief Redis 上的 SummaryData 儲存庫適配器，支持本機快取與同步到 Redis。
+     * @brief Redis 上 SummaryData 資料存儲的適配器，提供本地緩存與與 Redis 的同步功能。
      */
-    class RedisSummaryAdapter
+    class RedisSummaryAdapter : public finance::domain::IFinanceRepository<SummaryData, ErrorResult>
     {
     public:
+        // 靜態常數
+        static inline const std::string KEY_PREFIX = "finance:summary";
+
         /**
-         * @brief 建構並不立即連線 Redis，需呼叫 init().
+         * @brief 構造函數但不立即連接 Redis，需要調用 init() 來初始化連線。
          */
         RedisSummaryAdapter() = default;
 
         ~RedisSummaryAdapter() = default;
 
         /**
-         * @brief 與 Redis 建立連線。
-         * @return Result<void, ResultError> 連線結果
+         * @brief 初始化 Redis 連接。
+         * @return Result<void> 初始化結果
          */
-        Result<void, ResultError> init();
+        Result<void, ErrorResult> init();
 
         /**
-         * @brief 序列化並同步資料到 Redis，並更新本地快取。
-         * @param data 要同步的 SummaryData
-         * @return Result<void, ResultError> 操作結果
+         * @brief 序列化並同步資料到 Redis，同時更新本地緩存。
+         * @param data 要同步的 SummaryData 資料
+         * @return Result<void> 操作結果
          */
-        Result<void, ResultError> sync(const SummaryData &data);
+        Result<void, ErrorResult> sync(const SummaryData &data);
 
         /**
-         * @brief 從本地快取或 Redis 讀取資料。
+         * @brief 從本地緩存或 Redis 中讀取資料。
          * @param key 完整的 Redis Key，例如 "summary:AREA:STOCK"
-         * @return Result<SummaryData, ResultError> 查詢結果
+         * @return Result<SummaryData> 查詢結果
          */
-        Result<SummaryData, ResultError> get(const std::string &key);
+        Result<SummaryData, ErrorResult> get(const std::string &key) override;
 
         /**
-         * @brief 從 Redis 與本地快取刪除資料。
-         * @param key 要刪除的 Key
-         * @return Result<void, ResultError> 操作結果
+         * @brief 從 Redis 加載所有符合模式的資料到本地緩存。
+         * @return Result<void> 加載結果
          */
-        Result<void, ResultError> remove(const std::string &key);
+        Result<void, ErrorResult> loadAll();
 
         /**
-         * @brief 從 Redis 載入所有符合前綴的資料到本地快取。
-         * @return Result<void, ResultError> 載入結果
+         * @brief 實現 IFinanceRepository 接口的 set 方法
+         * @param key 要設置的 key
+         * @return Result<void> 操作結果
          */
-        Result<void, ResultError> loadAll();
+        Result<void, ErrorResult> set(const std::string &key) override;
 
         /**
-         * @brief 取得目前所有本地快取的資料。
-         * @return unordered_map<string, SummaryData> 快取內容副本
+         * @brief 實現 IFinanceRepository 接口的 update 方法
+         * @param key 要更新的 key
+         * @return Result<void> 操作結果
          */
-        std::unordered_map<std::string, SummaryData> getAll() const;
+        Result<void, ErrorResult> update(const std::string &key) override;
+
+        /**
+         * @brief 實現 IFinanceRepository 接口的 remove 方法
+         * @param key 要移除的 key
+         * @return bool 是否成功移除
+         */
+        bool remove(const std::string &key) override;
 
     private:
-        RedisContextPtr ctx_;
-        mutable std::shared_mutex cacheMutex_;
-        std::unordered_map<std::string, SummaryData> cache_;
-
-        static constexpr char KEY_PREFIX[] = "summary";
+        std::unique_ptr<RedisPlusPlusClient<std::string>> redisClient_; // Redis 客戶端
+        mutable std::shared_mutex cacheMutex_;                          // 本地緩存讀寫鎖
+        std::unordered_map<std::string, SummaryData> cache_;            // 本地緩存
 
         /**
-         * @brief 產生 Redis Key
+         * @brief 生成 Redis Key。
          */
-        static std::string makeKey(const SummaryData &data)
-        {
-            return utils::FinanceUtils::generateKey(KEY_PREFIX, data);
-        }
+        std::string makeKey(const SummaryData &data);
 
         /**
-         * @brief 以 KEYS 指令取得所有符合 pattern 的 Key。
+         * @brief 將 SummaryData 序列化為 JSON 字串。
          */
-        Result<std::vector<std::string>, ResultError> getKeys(const std::string &pattern);
+        Result<std::string, ErrorResult> toJson(const SummaryData &data);
 
         /**
-         * @brief 執行 JSON.GET 指令，取得原始 JSON 字串。
+         * @brief 將 JSON 反序列化為 SummaryData。
          */
-        Result<std::string, ResultError> getJson(const std::string &key);
-
-        /**
-         * @brief 將 SummaryData 序列化成 JSON。
-         */
-        static Result<std::string, ResultError> toJson(const SummaryData &data);
-
-        /**
-         * @brief 將 JSON 反序列化成 SummaryData。
-         */
-        static Result<SummaryData, ResultError> fromJson(const std::string &jsonStr);
+        Result<SummaryData, ErrorResult> fromJson(const std::string &jsonStr);
     };
 } // namespace finance::infrastructure::storage
