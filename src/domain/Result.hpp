@@ -173,27 +173,36 @@ namespace finance::domain
         }
 
         /**
-         * @brief 對錯誤值應用映射函數
-         * @tparam F 映射後的錯誤類型
-         * @param f 映射函數（應用於錯誤值）
-         * @return 映射後的 Result（成功或失敗）
+         * @brief 映射錯誤結果，接受一般 lambda
+         * @tparam Func 可呼叫物件類型，返回新錯誤類型
+         * @param f 錯誤映射函數
+         * @return 錯誤映射後的新 Result
          */
-        template <typename F>
-        constexpr Result<T, F> map_err(std::function<F(const E &)> f) const
+        template <typename Func>
+        auto map_err(Func &&f) const
+            -> Result<T, std::invoke_result_t<Func, const E &>>
         {
+            using NewErr = std::invoke_result_t<Func, const E &>;
             if (is_ok_)
-                return Result<T, F>::Ok(std::get<T>(value_));
-            return Result<T, F>::Err(f(std::get<E>(value_)));
+                return Result<T, NewErr>::Ok(std::get<T>(value_));
+            return Result<T, NewErr>::Err(std::forward<Func>(f)(std::get<E>(value_)));
+        }
+
+        // map_error 為 map_err 的別名
+        template <typename Func>
+        auto map_error(Func &&f) const
+            -> decltype(this->map_err(std::forward<Func>(f)))
+        {
+            return map_err(std::forward<Func>(f));
         }
 
         /**
          * @brief 連續進行操作（僅在成功時調用函數）
-         * @tparam U 返回的類型
          * @tparam Func 函數類型，接受 T 並返回 Result<U, E>
          * @param f 操作函數
          * @return 新的 Result
          */
-        template <typename U, typename Func>
+        template <typename Func>
         auto and_then(Func &&f) const -> decltype(f(std::declval<T>()))
         {
             if (is_ok_)
@@ -201,6 +210,22 @@ namespace finance::domain
 
             using ResultType = decltype(f(std::declval<T>()));
             return ResultType::Err(std::get<E>(value_));
+        }
+
+        /**
+         * @brief 連續進行操作（僅在失敗時調用函數）
+         * @tparam Func 函數類型，接受 E 並返回 Result<T, ?>
+         * @param f 操作函數
+         * @return 新的 Result
+         */
+        template <typename Func>
+        auto or_else(Func &&f) const
+            -> decltype(f(std::declval<E>()))
+        {
+            using ResultType = decltype(f(std::declval<E>()));
+            if (is_err())
+                return std::forward<Func>(f)(std::get<E>(value_));
+            return ResultType::Ok(std::get<T>(value_));
         }
 
         /**
@@ -282,17 +307,27 @@ namespace finance::domain
         }
 
         /**
-         * @brief 映射錯誤結果
-         * @tparam F 新的錯誤類型
-         * @param f 映射操作的函數
+         * @brief 映射錯誤結果，接受一般 lambda
+         * @tparam Func 可呼叫物件類型，返回新錯誤類型
+         * @param f 錯誤映射函數
          * @return 映射完成的新 Result
          */
-        template <typename F>
-        constexpr Result<void, F> map_err(std::function<F(const E &)> f) const
+        template <typename Func>
+        auto map_err(Func &&f) const
+            -> Result<void, std::invoke_result_t<Func, const E &>>
         {
+            using NewErr = std::invoke_result_t<Func, const E &>;
             if (is_ok())
-                return Result<void, F>::Ok();
-            return Result<void, F>::Err(f(*error_));
+                return Result<void, NewErr>::Ok();
+            return Result<void, NewErr>::Err(std::forward<Func>(f)(*error_));
+        }
+
+        // map_error 為 map_err 的別名
+        template <typename Func>
+        auto map_error(Func &&f) const
+            -> decltype(this->map_err(std::forward<Func>(f)))
+        {
+            return map_err(std::forward<Func>(f));
         }
 
         /**
@@ -309,6 +344,21 @@ namespace finance::domain
 
             using ResultType = decltype(f());
             return ResultType::Err(*error_);
+        }
+
+        /**
+         * @brief 連續操作，僅在失敗時執行下一步
+         * @tparam Func 函數類型，接受 E 並返回 Result<void, ?>
+         * @param f 操作函數
+         * @return 新的 Result
+         */
+        template <typename Func>
+        auto or_else(Func &&f) const
+            -> decltype(f(std::declval<E>()))
+        {
+            if (is_err())
+                return std::forward<Func>(f)(*error_);
+            return decltype(f(std::declval<E>()))::Ok();
         }
 
         /**

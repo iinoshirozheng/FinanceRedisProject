@@ -39,6 +39,7 @@ namespace finance::infrastructure::network
         explicit PacketProcessorFactory(std::shared_ptr<RedisSummaryAdapter> repository);
         IPackageHandler *getProcessorHandler(const std::string_view &tcode) const;
         Result<SummaryData> processData(const domain::ApData &ap_data) override;
+        Result<SummaryData> processData(const std::string_view &tcode, const domain::ApData &ap_data);
 
     private:
         std::unordered_map<std::string_view, std::unique_ptr<IPackageHandler>> handlers_;

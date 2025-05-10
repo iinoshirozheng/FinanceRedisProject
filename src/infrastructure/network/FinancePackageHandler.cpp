@@ -2,8 +2,8 @@
 #include "FinancePackageHandler.h"
 #include "../config/AreaBranchProvider.hpp"
 #include <loguru.hpp>
-#include <cstddef> // for offsetof
 #include "../../utils/LogHelper.hpp"
+#include "../../utils/FinanceUtils.hpp" // 確保引入 FinanceUtils
 
 namespace finance::infrastructure::network
 {
@@ -13,6 +13,7 @@ namespace finance::infrastructure::network
     using utils::FinanceUtils;
     namespace config = finance::infrastructure::config;
 
+    // 預設建構子與注入 repository 的建構子保持不變
     PacketProcessorFactory::PacketProcessorFactory()
     {
         handlers_.emplace("ELD001", std::make_unique<Hcrtm01Handler>());
@@ -34,118 +35,129 @@ namespace finance::infrastructure::network
 
     Result<SummaryData> PacketProcessorFactory::processData(const domain::ApData &ap_data)
     {
+        throw std::runtime_error("PacketProcessorFactory::processData not implemented");
+    }
+
+    Result<SummaryData> PacketProcessorFactory::processData(const std::string_view &tcode, const domain::ApData &ap_data)
+    {
+        // 1) 驗證 entry_type
         char et = ap_data.entry_type[0];
         if (et != 'A' && et != 'C')
-            return Result<SummaryData, ErrorResult>::Err(ErrorResult{ErrorCode::InvalidPacket, "Invalid entry type"});
+            return Result<SummaryData, ErrorResult>::Err(
+                ErrorResult{ErrorCode::InvalidPacket, "Invalid entry type"});
 
-        // 由 ap_data 反推父結構，讀取 t_code
-        auto pkg = reinterpret_cast<const domain::FinancePackageMessage *>(
-            reinterpret_cast<const char *>(&ap_data) - offsetof(domain::FinancePackageMessage, ap_data));
-        std::string_view tcode(pkg->t_code, sizeof(pkg->t_code));
+        // 2) 日誌輸出 t_code
+        LOG_F(INFO, "enter processData, t_code=%.*s",
+              int(tcode.size()), tcode.data());
 
-        LOG_F(INFO, "enter processData, t_code=%.*s", int(tcode.size()), tcode.data());
-
+        // 3) 取得對應的處理器
         auto *handler = getProcessorHandler(tcode);
         if (!handler)
         {
-            LOG_F(WARNING, "找不到處理器 t_code=%.*s", int(tcode.size()), tcode.data());
-            return Result<SummaryData, ErrorResult>::Err(ErrorResult{ErrorCode::UnknownTransactionCode, "Unknown t_code"});
+            LOG_F(WARNING, "找不到處理器 t_code=%.*s",
+                  int(tcode.size()), tcode.data());
+            return Result<SummaryData, ErrorResult>::Err(
+                ErrorResult{ErrorCode::UnknownTransactionCode, "Unknown t_code"});
         }
 
-        auto result = static_cast<Hcrtm01Handler *>(handler)->processData(ap_data);
+        // 4) 動態呼叫 handler
+        auto result = handler->processData(ap_data);
+
+        // 5) 日誌結果狀態
         LOG_F(INFO, "exit processData, result=%s",
               result.is_ok() ? "OK" : result.unwrap_err().message.c_str());
+
         return result;
     }
 
-    Result<SummaryData>
-    Hcrtm01Handler::processData(const domain::ApData &ap_data)
+    // ELD001 -> HCRTM01
+    Result<SummaryData> Hcrtm01Handler::processData(const domain::ApData &ap_data)
     {
         const auto &h = ap_data.data.hcrtm01;
-        // 僅處理符合系統的 area_center
-        if (std::string_view(h.area_center, sizeof(h.area_center)) != std::string_view(ap_data.system, sizeof(ap_data.system)))
+
+        // 1) trim header 與 data area_center
+        auto headerAreaCenter = FinanceUtils::trim_right(ap_data.system, sizeof(ap_data.system));
+        auto dataAreaCenter = FinanceUtils::trim_right(h.area_center, sizeof(h.area_center));
+        if (headerAreaCenter != dataAreaCenter)
         {
-            return Result<SummaryData, ErrorResult>::Err(ErrorResult{ErrorCode::InvalidPacket, "Invalid area center"});
+            return Result<SummaryData, ErrorResult>::Err(
+                ErrorResult{ErrorCode::InvalidPacket, "Invalid area center"});
         }
 
-        // 一次 BCD→int 轉換
-        auto ma = FinanceUtils::backOfficeToInt(h.margin_amount, sizeof(h.margin_amount));
-        auto mboA = FinanceUtils::backOfficeToInt(h.margin_buy_order_amount, sizeof(h.margin_buy_order_amount));
-        auto msmA = FinanceUtils::backOfficeToInt(h.margin_sell_match_amount, sizeof(h.margin_sell_match_amount));
-        auto mq = FinanceUtils::backOfficeToInt(h.margin_qty, sizeof(h.margin_qty));
-        auto mboQ = FinanceUtils::backOfficeToInt(h.margin_buy_order_qty, sizeof(h.margin_buy_order_qty));
-        auto msmQ = FinanceUtils::backOfficeToInt(h.margin_sell_match_qty, sizeof(h.margin_sell_match_qty));
-        auto mbmA = FinanceUtils::backOfficeToInt(h.margin_buy_match_amount, sizeof(h.margin_buy_match_amount));
-        auto mbmQ = FinanceUtils::backOfficeToInt(h.margin_buy_match_qty, sizeof(h.margin_buy_match_qty));
-        auto ahbA = FinanceUtils::backOfficeToInt(h.margin_after_hour_buy_order_amount,
-                                                  sizeof(h.margin_after_hour_buy_order_amount));
-        auto ahbQ = FinanceUtils::backOfficeToInt(h.margin_after_hour_buy_order_qty,
-                                                  sizeof(h.margin_after_hour_buy_order_qty));
+        // 2) BCD → int 轉換
+        auto margin_amount = FinanceUtils::backOfficeToInt(h.margin_amount, sizeof(h.margin_amount));
+        auto margin_buy_order_amount = FinanceUtils::backOfficeToInt(h.margin_buy_order_amount, sizeof(h.margin_buy_order_amount));
+        auto margin_sell_match_amount = FinanceUtils::backOfficeToInt(h.margin_sell_match_amount, sizeof(h.margin_sell_match_amount));
+        auto margin_qty = FinanceUtils::backOfficeToInt(h.margin_qty, sizeof(h.margin_qty));
+        auto margin_buy_order_qty = FinanceUtils::backOfficeToInt(h.margin_buy_order_qty, sizeof(h.margin_buy_order_qty));
+        auto margin_sell_match_qty = FinanceUtils::backOfficeToInt(h.margin_sell_match_qty, sizeof(h.margin_sell_match_qty));
+        auto short_amount = FinanceUtils::backOfficeToInt(h.short_amount, sizeof(h.short_amount));
+        auto short_sell_order_amount = FinanceUtils::backOfficeToInt(h.short_sell_order_amount, sizeof(h.short_sell_order_amount));
+        auto short_qty = FinanceUtils::backOfficeToInt(h.short_qty, sizeof(h.short_qty));
+        auto short_sell_order_qty = FinanceUtils::backOfficeToInt(h.short_sell_order_qty, sizeof(h.short_sell_order_qty));
+        auto short_after_hour_sell_order_amount = FinanceUtils::backOfficeToInt(h.short_after_hour_sell_order_amount, sizeof(h.short_after_hour_sell_order_amount));
+        auto short_after_hour_sell_order_qty = FinanceUtils::backOfficeToInt(h.short_after_hour_sell_order_qty, sizeof(h.short_after_hour_sell_order_qty));
+        auto short_sell_match_amount = FinanceUtils::backOfficeToInt(h.short_sell_match_amount, sizeof(h.short_sell_match_amount));
+        auto short_sell_match_qty = FinanceUtils::backOfficeToInt(h.short_sell_match_qty, sizeof(h.short_sell_match_qty));
+        auto margin_after_hour_buy_order_amount = FinanceUtils::backOfficeToInt(h.margin_after_hour_buy_order_amount, sizeof(h.margin_after_hour_buy_order_amount));
+        auto margin_after_hour_buy_order_qty = FinanceUtils::backOfficeToInt(h.margin_after_hour_buy_order_qty, sizeof(h.margin_after_hour_buy_order_qty));
+        auto margin_buy_match_amount = FinanceUtils::backOfficeToInt(h.margin_buy_match_amount, sizeof(h.margin_buy_match_amount));
+        auto margin_buy_match_qty = FinanceUtils::backOfficeToInt(h.margin_buy_match_qty, sizeof(h.margin_buy_match_qty));
 
-        auto sa = FinanceUtils::backOfficeToInt(h.short_amount, sizeof(h.short_amount));
-        auto ssoA = FinanceUtils::backOfficeToInt(h.short_sell_order_amount,
-                                                  sizeof(h.short_sell_order_amount));
-        auto sq = FinanceUtils::backOfficeToInt(h.short_qty, sizeof(h.short_qty));
-        auto ssoQ = FinanceUtils::backOfficeToInt(h.short_sell_order_qty,
-                                                  sizeof(h.short_sell_order_qty));
-        auto ssmA = FinanceUtils::backOfficeToInt(h.short_sell_match_amount,
-                                                  sizeof(h.short_sell_match_amount));
-        auto ssmQ = FinanceUtils::backOfficeToInt(h.short_sell_match_qty,
-                                                  sizeof(h.short_sell_match_qty));
-        auto ahsA = FinanceUtils::backOfficeToInt(h.short_after_hour_sell_order_amount,
-                                                  sizeof(h.short_after_hour_sell_order_amount));
-        auto ahsQ = FinanceUtils::backOfficeToInt(h.short_after_hour_sell_order_qty,
-                                                  sizeof(h.short_after_hour_sell_order_qty));
-
+        // 3) trim stock_id 與 area_center
         SummaryData s;
-        s.stock_id = std::string_view(h.stock_id, sizeof(h.stock_id));
-        s.area_center = std::string_view(h.area_center, sizeof(h.area_center));
+        s.stock_id = FinanceUtils::trim_right(h.stock_id, sizeof(h.stock_id));
+        s.area_center = headerAreaCenter;
 
-        // 盤中可用
-        s.margin_available_amount = ma - mboA + msmA;
-        s.margin_available_qty = mq - mboQ + msmQ;
-        s.short_available_amount = sa - ssoA;
-        s.short_available_qty = sq - ssoQ;
+        // 4) 計算「盤中／盤後」可用量
+        s.margin_available_amount = margin_amount - margin_buy_order_amount + margin_sell_match_amount;
+        s.margin_available_qty = margin_qty - margin_buy_order_qty + margin_sell_match_qty;
+        s.short_available_amount = short_amount - short_sell_order_amount;
+        s.short_available_qty = short_qty - short_sell_order_qty;
 
-        // 盤後可用（Qty 從 match_qty 扣除）
-        s.after_margin_available_amount = ma - mbmA + msmA - ahbA;
-        s.after_margin_available_qty = mq - mbmQ + msmQ - ahbQ;
+        s.after_margin_available_amount = margin_amount - margin_buy_match_amount + margin_sell_match_amount - margin_after_hour_buy_order_amount;
+        s.after_margin_available_qty = margin_qty - margin_buy_match_qty + margin_sell_match_qty - margin_after_hour_buy_order_qty;
+        s.after_short_available_amount = short_amount - short_sell_match_amount - short_after_hour_sell_order_amount;
+        s.after_short_available_qty = short_qty - short_sell_match_qty - short_after_hour_sell_order_qty;
 
-        s.after_short_available_amount = sa - ssmA - ahsA;
-        s.after_short_available_qty = sq - ssmQ - ahsQ;
-
+        // 5) 屬於分支
         s.belong_branches = config::AreaBranchProvider::getBranchesForArea(s.area_center);
 
         LOG_CTX(std::string_view(h.stock_id, sizeof(h.stock_id)),
                 s.stock_id, s.area_center, INFO,
                 "margin_avail_qty=%lld", s.margin_available_qty);
-
         return Result<SummaryData, ErrorResult>::Ok(std::move(s));
     }
 
-    Result<SummaryData>
-    Hcrtm05pHandler::processData(const domain::ApData &ap_data)
+    // ELD002 -> HCRTM05P
+    Result<SummaryData> Hcrtm05pHandler::processData(const domain::ApData &ap_data)
     {
         const auto &h = ap_data.data.hcrtm05p;
+
+        // 1) trim stock_id 與 broker_id
+        std::string stockId = FinanceUtils::trim_right(h.stock_id, sizeof(h.stock_id));
+        std::string branchId = FinanceUtils::trim_right(h.broker_id, sizeof(h.broker_id));
+
+        // 2) BCD → int offset
+        int64_t buyOff = FinanceUtils::backOfficeToInt(h.margin_buy_offset_qty, sizeof(h.margin_buy_offset_qty));
+        int64_t sellOff = FinanceUtils::backOfficeToInt(h.short_sell_offset_qty, sizeof(h.short_sell_offset_qty));
+
+        // 3) 填入 SummaryData
         SummaryData s;
-        s.stock_id = std::string_view(h.stock_id, sizeof(h.stock_id));
-        s.area_center = std::string_view(h.broker_id, sizeof(h.broker_id));
-
-        auto buyOff = FinanceUtils::backOfficeToInt(h.margin_buy_offset_qty,
-                                                    sizeof(h.margin_buy_offset_qty));
-        auto sellOff = FinanceUtils::backOfficeToInt(h.short_sell_offset_qty,
-                                                     sizeof(h.short_sell_offset_qty));
-
+        s.stock_id = stockId;
+        s.area_center = branchId;
         s.margin_available_qty = buyOff;
-        s.short_available_qty = sellOff;
         s.after_margin_available_qty = buyOff;
+        s.short_available_qty = sellOff;
         s.after_short_available_qty = sellOff;
+
+        // 4) 屬於分支
         s.belong_branches = config::AreaBranchProvider::getBranchesForArea(s.area_center);
 
         LOG_CTX(std::string_view(h.stock_id, sizeof(h.stock_id)),
                 s.stock_id, s.area_center, INFO,
                 "margin_avail_qty=%lld", s.margin_available_qty);
-
         return Result<SummaryData, ErrorResult>::Ok(std::move(s));
     }
-}
+
+} // namespace finance::infrastructure::network

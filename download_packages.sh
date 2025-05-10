@@ -223,8 +223,12 @@ clone_redis_plus_plus() {
 
     # === redis-plus-plus ===
     if(LINK_REDIS_PLUS_PLUS)
+
+        message(STATUS "Linking hiredis (static)...")
+        target_include_directories(${target_name} PRIVATE ${THIRD_PARTY_DIR}/hiredis/include)
+        target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/hiredis/lib/libhiredis.a)
+
         message(STATUS "Linking redis-plus-plus (static)...")
-        
         # Make sure hiredis is linked first as it's a dependency
         if(NOT LINK_HIREDIS)
             message(FATAL_ERROR "redis-plus-plus requires hiredis, please enable LINK_HIREDIS")

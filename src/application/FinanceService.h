@@ -55,8 +55,8 @@ namespace finance::application
         void shutdown();
 
     private:
-        std::shared_ptr<finance::infrastructure::storage::RedisSummaryAdapter> repository_;
-        std::shared_ptr<finance::infrastructure::network::PacketProcessorFactory> packetHandler_;
+        std::shared_ptr<finance::domain::IFinanceRepository<finance::domain::SummaryData, finance::domain::ErrorResult>> repository_;
+        std::shared_ptr<finance::domain::IPackageHandler> packetHandler_;
         std::unique_ptr<finance::infrastructure::network::TcpServiceAdapter> tcpService_;
 
         std::atomic<int> signalStatus_{0};

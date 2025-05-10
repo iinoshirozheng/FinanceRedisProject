@@ -11,17 +11,24 @@
 
 using finance::domain::ErrorCode;
 using finance::domain::ErrorResult;
+using finance::domain::IFinanceRepository;
+using finance::domain::IPackageHandler;
 using finance::domain::Result;
+using finance::domain::SummaryData;
 
 namespace finance::application
 {
     // 全域指標，用於 signal callback
     static FinanceService *g_service = nullptr;
+    static void (*g_signal_handler)(int) = nullptr;
 
-    FinanceService::FinanceService(std::shared_ptr<finance::domain::IFinanceRepository<finance::domain::SummaryData, finance::domain::ErrorResult>> repository,
-                                   std::shared_ptr<finance::domain::IPackageHandler> packetHandler)
+    FinanceService::FinanceService(std::shared_ptr<IFinanceRepository<SummaryData, ErrorResult>> repository,
+                                   std::shared_ptr<IPackageHandler> packetHandler)
+        : repository_(std::move(repository)),
+          packetHandler_(std::move(packetHandler))
     {
-        // Initialize members
+        // Initialize g_service for signal handling
+        g_service = this;
     }
 
     Result<void, ErrorResult> FinanceService::initialize()
@@ -62,25 +69,24 @@ namespace finance::application
         if (!tcpService_->start())
             return Result<void, ErrorResult>::Err(ErrorResult{ErrorCode::TcpStartFailed, "TCP Service 啟動失敗"});
 
-        // 設置信號回調 (使用 lambda 和 std::atomic)
-        std::atomic<int> signalStatus{0};
-        auto signalHandler = [](int sig)
+        // 設置信號回調
+        g_signal_handler = [](int sig)
         {
             LOG_F(WARNING, "處理信號: %d", sig);
             if (g_service)
             {
+                g_service->signalStatus_ = sig;
                 g_service->shutdown();
             }
         };
-
-        std::signal(SIGINT, signalHandler);
-        std::signal(SIGTERM, signalHandler);
+        std::signal(SIGINT, g_signal_handler);
+        std::signal(SIGTERM, g_signal_handler);
 
         isRunning_ = true;
         LOG_F(INFO, "Finance System 運行中，按 Ctrl+C 停止");
 
         // 主循環：等待中斷／終止信號
-        while (signalStatus == 0)
+        while (signalStatus_ == 0)
         {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }

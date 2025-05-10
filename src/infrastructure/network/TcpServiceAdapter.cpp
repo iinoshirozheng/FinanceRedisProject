@@ -2,9 +2,12 @@
 #include "TcpServiceAdapter.h"
 #include <loguru.hpp>
 #include <Poco/Net/StreamSocket.h>
+#include "../../utils/FinanceUtils.hpp"
+#include "../config/ConnectionConfigProvider.hpp"
 
 namespace finance::infrastructure::network
 {
+    using config::ConnectionConfigProvider;
     using domain::ErrorResult;
     using domain::Result;
     using utils::FinanceUtils;
@@ -31,6 +34,9 @@ namespace finance::infrastructure::network
             return;
 
         running_ = false;
+        serverSocket_.close();
+        cv_.notify_all();
+
         if (acceptThread_.joinable())
             acceptThread_.join();
         if (processingThread_.joinable())
@@ -39,96 +45,130 @@ namespace finance::infrastructure::network
 
     void TcpServiceAdapter::producer()
     {
-        Poco::Net::StreamSocket clientSocket;
-        std::vector<char> buffer(RING_BUFFER_SIZE);
-
-        while (running_)
+        try
         {
-            try
+            Poco::Net::StreamSocket clientSocket;
+
+            while (running_)
             {
-                clientSocket = serverSocket_.acceptConnection();
-                clientSocket.setReceiveTimeout(Poco::Timespan(SOCKET_TIMEOUT_MS * 1000));
-
-                while (running_)
+                try
                 {
-                    int n = clientSocket.receiveBytes(buffer.data(), buffer.size());
-                    if (n <= 0)
-                        break;
+                    clientSocket = serverSocket_.acceptConnection();
+                    clientSocket.setReceiveTimeout(
+                        Poco::Timespan(
+                            ConnectionConfigProvider::socketTimeoutMs() * 1000));
 
-                    size_t maxLen;
-                    char *writePtr = ringBuffer_.writablePtr(maxLen);
-                    if (static_cast<size_t>(n) > maxLen)
+                    while (running_)
                     {
-                        LOG_F(ERROR, "Buffer overflow: received %d bytes but only %zu available", n, maxLen);
-                        break;
+                        // 1) 先拿到可連續寫入的位置與長度
+                        size_t maxLen;
+                        char *writePtr = ringBuffer_.writablePtr(maxLen);
+                        if (maxLen == 0)
+                        {
+                            // 緩衝區滿，輕自旋或稍微 sleep
+                            std::this_thread::yield();
+                            continue;
+                        }
+
+                        // 2) 直接從 socket 讀到這塊記憶體
+                        int n = clientSocket.receiveBytes(writePtr, maxLen);
+                        if (n <= 0)
+                            break;
+
+                        // 3) 發佈寫入長度
+                        ringBuffer_.enqueue(static_cast<size_t>(n));
+                        cv_.notify_one();
                     }
-                    std::memcpy(writePtr, buffer.data(), n);
-                    ringBuffer_.enqueue(n);
+                }
+                catch (const Poco::Exception &e)
+                {
+                    if (running_)
+                        LOG_F(ERROR, "Socket error: %s", e.displayText().c_str());
                 }
             }
-            catch (const Poco::Exception &e)
-            {
-                if (running_)
-                    LOG_F(ERROR, "Socket error: %s", e.displayText().c_str());
-            }
+        }
+        catch (const std::exception &e)
+        {
+            LOG_F(ERROR, "Thread exception: %s", e.what());
+        }
+        catch (...)
+        {
+            LOG_F(ERROR, "Unknown exception in thread");
         }
     }
 
     void TcpServiceAdapter::consumer()
     {
-        std::vector<char> tmp;
-        tmp.reserve(RING_BUFFER_SIZE);
-
-        while (running_)
+        try
         {
-            auto segOpt = ringBuffer_.getNextPacket();
-            if (!segOpt)
-            {
-                std::this_thread::yield();
-                continue;
-            }
-            auto seg = *segOpt;
+            std::vector<char> tmp;
+            tmp.reserve(sizeof(domain::FinancePackageMessage));
 
-            // 心跳過濾
-            if (seg.totalLen() == 2 || seg.totalLen() == 3)
+            while (running_)
             {
-                ringBuffer_.dequeue(seg.totalLen());
-                continue;
-            }
+                std::unique_lock<std::mutex> lk(cvMutex_);
+                cv_.wait(lk, [this]
+                         { return !ringBuffer_.empty() || !running_; });
 
-            // 重組跨界封包
-            const domain::FinancePackageMessage *pkg;
-            if (seg.len2 == 0)
-            {
-                pkg = reinterpret_cast<const domain::FinancePackageMessage *>(seg.ptr1);
-            }
-            else
-            {
-                tmp.clear();
-                tmp.insert(tmp.end(), seg.ptr1, seg.ptr1 + seg.len1);
-                tmp.insert(tmp.end(), seg.ptr2, seg.ptr2 + seg.len2);
-                pkg = reinterpret_cast<const domain::FinancePackageMessage *>(tmp.data());
-            }
+                if (!running_)
+                    break;
 
-            // 解析並 sync
-            auto res = handler_->processData(pkg->ap_data);
-            if (res.is_ok())
-            {
-                auto &s = res.unwrap();
-                auto key = FinanceUtils::generateKey("summary", s);
-                auto r2 = repository_->sync(s);
-                if (r2.is_err())
+                auto segOpt = ringBuffer_.getNextPacket();
+                if (!segOpt)
                 {
-                    LOG_F(ERROR, "Redis sync 失敗 key=%s: %s",
-                          key.c_str(), r2.unwrap_err().message.c_str());
+                    continue;
                 }
-            }
-            else
-            {
-                LOG_F(ERROR, "封包解析失敗: %s", res.unwrap_err().message.c_str());
-            }
+                auto seg = *segOpt;
 
-            ringBuffer_.dequeue(seg.totalLen());
+                // 心跳過濾
+                if (seg.totalLen() < 3)
+                {
+                    ringBuffer_.dequeue(seg.totalLen());
+                    continue;
+                }
+
+                // 重組跨界封包
+                const domain::FinancePackageMessage *pkg;
+                if (seg.len2 == 0)
+                {
+                    pkg = reinterpret_cast<const domain::FinancePackageMessage *>(seg.ptr1);
+                }
+                else
+                {
+                    tmp.clear();
+                    tmp.insert(tmp.end(), seg.ptr1, seg.ptr1 + seg.len1);
+                    tmp.insert(tmp.end(), seg.ptr2, seg.ptr2 + seg.len2);
+                    pkg = reinterpret_cast<const domain::FinancePackageMessage *>(tmp.data());
+                }
+
+                // 解析並 sync
+                auto res = handler_->processData(pkg->ap_data);
+                if (res.is_ok())
+                {
+                    auto &s = res.unwrap();
+                    auto key = FinanceUtils::generateKey("summary", s);
+                    auto r2 = repository_->sync(s);
+                    if (r2.is_err())
+                    {
+                        LOG_F(ERROR, "Redis sync 失敗 key=%s: %s",
+                              key.c_str(), r2.unwrap_err().message.c_str());
+                    }
+                }
+                else
+                {
+                    LOG_F(ERROR, "封包解析失敗: %s", res.unwrap_err().message.c_str());
+                }
+
+                ringBuffer_.dequeue(seg.totalLen());
+            }
+        }
+        catch (const std::exception &e)
+        {
+            LOG_F(ERROR, "Thread exception: %s", e.what());
+        }
+        catch (...)
+        {
+            LOG_F(ERROR, "Unknown exception in thread");
         }
     }
 }

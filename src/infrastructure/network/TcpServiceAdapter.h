@@ -6,19 +6,19 @@
 #include <Poco/Net/ServerSocket.h>
 #include "RingBuffer.hpp"
 #include "../config/ConnectionConfigProvider.hpp"
-#include "FinancePackageHandler.h"
-#include "../storage/RedisSummaryAdapter.h"
+#include "../../domain/IPackageHandler.h"
+#include "../../domain/IFinanceRepository.h"
+#include "../../domain/FinanceDataStructure.h"
 
 namespace finance::infrastructure::network
 {
-    static constexpr int SOCKET_TIMEOUT_MS = 1000;               // ms
     static constexpr size_t RING_BUFFER_SIZE = 16 * 1024 * 1024; // 16MB
 
     class TcpServiceAdapter
     {
     public:
-        explicit TcpServiceAdapter(std::shared_ptr<PacketProcessorFactory> handler,
-                                   std::shared_ptr<storage::RedisSummaryAdapter> repository)
+        explicit TcpServiceAdapter(std::shared_ptr<finance::domain::IPackageHandler> handler,
+                                   std::shared_ptr<finance::domain::IFinanceRepository<finance::domain::SummaryData, finance::domain::ErrorResult>> repository)
             : serverSocket_{{"0.0.0.0", static_cast<unsigned short>(config::ConnectionConfigProvider::serverPort())}},
               handler_(std::move(handler)),
               repository_(std::move(repository)),
@@ -26,6 +26,7 @@ namespace finance::infrastructure::network
         {
             serverSocket_.setReuseAddress(true);
             serverSocket_.setReusePort(true);
+            serverSocket_.setReceiveTimeout(Poco::Timespan(config::ConnectionConfigProvider::socketTimeoutMs() * 1000));
         }
 
         ~TcpServiceAdapter();
@@ -37,11 +38,13 @@ namespace finance::infrastructure::network
         void consumer();
 
         Poco::Net::ServerSocket serverSocket_;
-        std::shared_ptr<PacketProcessorFactory> handler_;
-        std::shared_ptr<storage::RedisSummaryAdapter> repository_;
+        std::shared_ptr<finance::domain::IPackageHandler> handler_;
+        std::shared_ptr<finance::domain::IFinanceRepository<finance::domain::SummaryData, finance::domain::ErrorResult>> repository_;
         RingBuffer<RING_BUFFER_SIZE> ringBuffer_;
         std::thread acceptThread_;
         std::thread processingThread_;
         std::atomic<bool> running_{false};
+        std::mutex cvMutex_;
+        std::condition_variable cv_;
     };
 }

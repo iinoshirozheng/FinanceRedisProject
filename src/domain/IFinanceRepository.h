@@ -20,6 +20,25 @@ namespace finance::domain
         virtual ~IFinanceRepository() = default;
 
         /**
+         * @brief 初始化儲存庫
+         * @return 初始化結果
+         */
+        virtual Result<void, E> init() = 0;
+
+        /**
+         * @brief 載入所有數據
+         * @return 載入結果
+         */
+        virtual Result<void, E> loadAll() = 0;
+
+        /**
+         * @brief 序列化並同步資料到儲存
+         * @param data 要同步的資料
+         * @return 同步結果
+         */
+        virtual Result<void, E> sync(const T &data) = 0;
+
+        /**
          * @brief 獲取數據實體
          * @param key 鍵值，用於標識數據實體
          * @return 若成功儲存返回 true，失敗返回 false
