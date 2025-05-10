@@ -32,13 +32,6 @@ namespace finance::domain
         virtual Result<void, E> loadAll() = 0;
 
         /**
-         * @brief 序列化並同步資料到儲存
-         * @param data 要同步的資料
-         * @return 同步結果
-         */
-        virtual Result<void, E> sync(const T &data) = 0;
-
-        /**
          * @brief 獲取數據實體
          * @param key 鍵值，用於標識數據實體
          * @return 若成功儲存返回 true，失敗返回 false
@@ -58,6 +51,14 @@ namespace finance::domain
          * @return 若成功更新返回 true，失敗返回 false
          */
         virtual Result<void, E> update(const std::string &key) = 0;
+
+        /**
+         * @brief 同步數據到 Redis
+         * @param key 鍵值，用於標識數據實體
+         * @param data 要同步的數據
+         * @return 同步結果
+         */
+        virtual Result<void, E> sync(const std::string &key, const T &data) = 0;
 
         /**
          * @brief 刪除數據實體

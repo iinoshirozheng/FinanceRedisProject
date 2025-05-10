@@ -146,8 +146,9 @@ namespace finance::infrastructure::network
                 if (res.is_ok())
                 {
                     auto &s = res.unwrap();
-                    auto key = FinanceUtils::generateKey("summary", s);
-                    auto r2 = repository_->sync(s);
+
+                    const std::string key = "summary:" + s.area_center + ":" + s.stock_id;
+                    auto r2 = repository_->sync(key, s);
                     if (r2.is_err())
                     {
                         LOG_F(ERROR, "Redis sync 失敗 key=%s: %s",

@@ -105,11 +105,5 @@ namespace finance::utils
 
             return domain::MessageTransactionType::OTHERS;
         }
-
-        // 通用模板函數，用於根據任意數據結構創建唯一鍵
-        static std::string generateKey(const std::string &prefix, const domain::SummaryData &data)
-        {
-            return prefix + ":" + data.area_center + ":" + data.stock_id;
-        }
     };
 } // namespace finance::utils

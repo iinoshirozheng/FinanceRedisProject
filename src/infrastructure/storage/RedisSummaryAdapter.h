@@ -42,10 +42,11 @@ namespace finance::infrastructure::storage
 
         /**
          * @brief 序列化並同步資料到 Redis，同時更新本地緩存。
+         * @param key 要同步的 key
          * @param data 要同步的 SummaryData 資料
          * @return Result<void> 操作結果
          */
-        Result<void, ErrorResult> sync(const SummaryData &data) override;
+        Result<void, ErrorResult> sync(const std::string &key, const SummaryData &data) override;
 
         /**
          * @brief 從本地緩存或 Redis 中讀取資料。
@@ -94,11 +95,6 @@ namespace finance::infrastructure::storage
          * @return Result<void, ErrorResult> 緩存更新結果
          */
         Result<void, ErrorResult> setCacheData(const std::string &key, SummaryData data);
-
-        /**
-         * @brief 生成 Redis Key。
-         */
-        std::string makeKey(const SummaryData &data);
 
         /**
          * @brief 將 SummaryData 序列化為 JSON 字串。

@@ -34,7 +34,7 @@ int main(int argc, char *argv[])
 
         // Create dependencies for the service
         auto redisRepository = std::make_shared<infrastructure::storage::RedisSummaryAdapter>();
-        auto packetHandler = std::make_shared<infrastructure::network::PacketProcessorFactory>(redisRepository);
+        auto packetHandler = std::make_shared<infrastructure::network::PacketProcessorFactory>();
 
         // Create and initialize service
         auto service = application::FinanceService(redisRepository, packetHandler);

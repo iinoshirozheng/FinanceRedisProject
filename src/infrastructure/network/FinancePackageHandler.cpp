@@ -20,13 +20,6 @@ namespace finance::infrastructure::network
         handlers_.emplace("ELD002", std::make_unique<Hcrtm05pHandler>());
     }
 
-    PacketProcessorFactory::PacketProcessorFactory(std::shared_ptr<storage::RedisSummaryAdapter> repository)
-        : repository_(std::move(repository))
-    {
-        handlers_.emplace("ELD001", std::make_unique<Hcrtm01Handler>());
-        handlers_.emplace("ELD002", std::make_unique<Hcrtm05pHandler>());
-    }
-
     domain::IPackageHandler *PacketProcessorFactory::getProcessorHandler(const std::string_view &tcode) const
     {
         auto it = handlers_.find(tcode);

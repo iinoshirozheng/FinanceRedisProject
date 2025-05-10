@@ -50,13 +50,12 @@ namespace finance::infrastructure::storage
     /**
      * @brief 序列化並同步資料到 Redis，同時更新本地緩存。
      */
-    Result<void, ErrorResult> RedisSummaryAdapter::sync(const SummaryData &d)
+    Result<void, ErrorResult> RedisSummaryAdapter::sync(const std::string &key, const SummaryData &d)
     {
         if (!redisClient_)
             return Result<void, ErrorResult>::Err(
                 ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 未正確連線"});
 
-        const auto key = makeKey(d);
         return summaryDataToJson(d)
             .and_then([this, key](const std::string &j)
                       { return redisClient_->setJson(key, "$", j); })
@@ -203,15 +202,6 @@ namespace finance::infrastructure::storage
                             "解析JSON失敗: " + std::string(ex.what())});
         }
     }
-
-    /**
-     * @brief 將 SummaryData 的 key 序列化為 Redis key
-     */
-    std::string RedisSummaryAdapter::makeKey(const SummaryData &data)
-    {
-        return "summary:" + data.stock_id + ":" + data.area_center;
-    }
-
     /**
      * @brief 實現 remove 方法
      */
@@ -265,7 +255,8 @@ namespace finance::infrastructure::storage
             }
         }
 
-        return sync(company_summary);
+        auto all_key = "summary:ALL:" + stock_id;
+        return sync(all_key, company_summary);
     }
 
     /**
