@@ -74,9 +74,9 @@ namespace finance::infrastructure::storage
                     ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 未正確連線"});
 
             return summaryDataToJson(d)
-                .and_then([this, key](const std::string &j)
+                .and_then([this, &key](const std::string &j)
                           { return redisClient_->setJson(key, "$", j); })
-                .and_then([this, key, d]
+                .and_then([this, &key, &d]
                           { return setCacheData(key, d); })
                 .map_err([&](const ErrorResult &e)
                          { return ErrorResult{e.code, "Sync 失敗: " + e.message}; });
@@ -101,13 +101,14 @@ namespace finance::infrastructure::storage
 
             // 2) 快取未命中，從 Redis 讀取
             return redisClient_->getJson(key, "$")
-                .and_then([this](const std::string &jsonStr)
+                .and_then([this, key](const std::string &jsonStr)
                           { return jsonToSummaryData(jsonStr); })
                 .and_then([this, key](const SummaryData &d)
-                          { return setCacheData(key, d)
-                                .and_then([d]
-                                          { return Result<SummaryData, ErrorResult>::Ok(d); }); })
-                .map_err([&](const ErrorResult &e)
+                          {
+                        // 先更新快取，再直接回傳 d
+                        setCacheData(key, d);
+                        return Result<SummaryData, ErrorResult>::Ok(std::move(d)); })
+                .map_err([key](const ErrorResult &e)
                          { return ErrorResult{e.code, "Get 失敗 [" + key + "]: " + e.message}; });
         }
 
