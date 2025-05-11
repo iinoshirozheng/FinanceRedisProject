@@ -1,4 +1,4 @@
-#include "../infrastructure/network/TransactionProcessor.hpp"
+#include "../infrastructure/network/TransactionHandler.hpp"
 #include "../infrastructure/network/FinancePackageHandler.hpp"
 #include "../infrastructure/storage/RedisSummaryAdapter.hpp"
 #include "../infrastructure/config/ConnectionConfigProvider.hpp"

@@ -48,6 +48,7 @@ namespace finance::application
             if (initRes.is_err())
                 return Result<void, ErrorResult>::Err(
                     ErrorResult{ErrorCode::InternalError, "FinanceService 初始化失敗: " + initRes.unwrap_err().message});
+            LOG_F(INFO, "Redis 連線成功");
 
             LOG_F(INFO, "從 Redis 載入所有 summary...");
             auto loadRes = repository_->loadAll();

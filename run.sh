@@ -84,9 +84,9 @@ if [ $? -eq 0 ]; then
     echo "Do you want to run the application now? (y/n)"
     read -r answer
     if [[ "$answer" =~ ^[Yy]$ ]]; then
-        print_status "Running finance_manager..."
+        print_status "Running CACB..."
         cd "$SCRIPT_DIR"
-        ./"$BUILD_DIR"/src/finance_manager "$@"
+        ./"$BUILD_DIR"/CACB "$@"
     else
         print_status "Exiting without running the application."
     fi

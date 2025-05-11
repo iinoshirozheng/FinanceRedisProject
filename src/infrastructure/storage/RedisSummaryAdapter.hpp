@@ -44,21 +44,21 @@ namespace finance::infrastructure::storage
             if (redisClient_)
                 return Result<void, ErrorResult>::Ok();
 
-            const std::string uri = config::ConnectionConfigProvider::redisUri();
-            const size_t poolSize = config::ConnectionConfigProvider::redisPoolSize();
-            const int waitTimeoutMs = config::ConnectionConfigProvider::redisWaitTimeoutMs();
             auto client = std::make_unique<RedisPlusPlusClient<SummaryData, ErrorResult>>();
+            const auto uri = config::ConnectionConfigProvider::redisUri();
+            const auto poolSize = config::ConnectionConfigProvider::redisPoolSize();
+            const auto waitTimeoutMs = config::ConnectionConfigProvider::redisWaitTimeoutMs();
 
             return client->setConnectOption(poolSize, waitTimeoutMs)
-                .and_then([client = std::move(client), uri]() mutable
-                          { return client->connect(uri); })
-                .and_then([this, client = std::move(client)]() mutable
-                          {
+                .and_then([&] { // ← 注意：這裡不帶參數
+                    return client->connect(uri);
+                })
+                .and_then([&] { // ← 這裡也不帶參數
                     this->redisClient_ = std::move(client);
-                    return Result<void, ErrorResult>::Ok(); })
+                    return Result<void, ErrorResult>::Ok();
+                })
                 .map_err([](const ErrorResult &e)
-                         { return ErrorResult{ErrorCode::RedisConnectionFailed,
-                                              "Redis 連線失敗: " + e.message}; });
+                         { return ErrorResult{e.code, "Redis 連線失敗: " + e.message}; });
         }
 
         /**
