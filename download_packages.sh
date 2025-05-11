@@ -121,6 +121,41 @@ clone_spdlog() {
 EOL
 }
 
+clone_gtest() {
+    if [ ! -d "googletest" ]; then
+        echo "Cloning googletest..."
+        git clone https://github.com/google/googletest.git
+    else
+        update_repo "googletest"
+    fi
+
+    cd googletest
+    mkdir -p build && cd build
+    cmake -DCMAKE_INSTALL_PREFIX="${SCRIPT_DIR}/third_party/googletest" \
+          -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+          -DBUILD_GMOCK=ON \
+          -DBUILD_GTEST=ON \
+          -DCMAKE_BUILD_TYPE=Release \
+          ..
+    make -j$(sysctl -n hw.ncpu)
+    make install
+    cd ../../
+    rm -rf googletest
+
+    # Add gtest CMake configuration
+    cat >> "${SCRIPT_DIR}/third_party/LinkThirdparty.cmake" << 'EOL'
+
+    # === GoogleTest ===
+    if(LINK_GTEST)
+        message(STATUS "Linking GoogleTest...")
+        target_include_directories(${target_name} PRIVATE ${THIRD_PARTY_DIR}/googletest/include)
+        target_link_libraries(${target_name} PRIVATE
+            ${THIRD_PARTY_DIR}/googletest/lib/libgtest.a
+            ${THIRD_PARTY_DIR}/googletest/lib/libgtest_main.a
+            pthread)
+    endif()
+EOL
+}
 
 # Clone nlohmann json (header-only)
 clone_nlohmann_json() {
@@ -287,6 +322,7 @@ main() {
     clone_poco
     clone_redis_plus_plus
     clone_spdlog
+    clone_gtest
     
     clean_build
 

@@ -84,6 +84,14 @@ option(LINK_SPDLOG "啟用 spdlog 日誌記錄器" ON)
 EOL
     fi
 
+    # Check if googletest was cloned
+    if [ -d "${SCRIPT_DIR}/third_party/googletest" ]; then
+        cat >> "${SCRIPT_DIR}/CMakeLists.txt" << EOL
+option(LINK_GTEST "啟用 Google Test 框架" ON)
+option(BUILD_TESTS "建立單元測試" ON)
+EOL
+    fi
+
     # Add status messages for enabled options
     cat >> "${SCRIPT_DIR}/CMakeLists.txt" << EOL
 
@@ -125,6 +133,13 @@ EOL
 message(STATUS " LINK_SPDLOG: \${LINK_SPDLOG}")
 EOL
     fi
+
+    if [ -d "${SCRIPT_DIR}/third_party/googletest" ]; then
+        cat >> "${SCRIPT_DIR}/CMakeLists.txt" << EOL
+message(STATUS " LINK_GTEST: \${LINK_GTEST}")
+message(STATUS " BUILD_TESTS: \${BUILD_TESTS}")
+EOL
+    fi
 }
 
 # Generate CMakeLists.txt source files
@@ -154,6 +169,48 @@ target_include_directories($(basename "${SCRIPT_DIR}") PRIVATE \${CMAKE_SOURCE_D
 # 第三方靜態連結
 LinkThirdparty($(basename "${SCRIPT_DIR}"))
 message(STATUS "已通過 LinkThirdparty 函數連結第三方庫。")
+
+# 設置單元測試
+if(BUILD_TESTS AND LINK_GTEST)
+    message(STATUS "啟用單元測試...")
+    enable_testing()
+    
+    # 掃描測試源文件
+    file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS \${CMAKE_SOURCE_DIR}/tests/*.cpp)
+    
+    if(TEST_SOURCES)
+        message(STATUS "找到的測試源文件:")
+        foreach(TEST_FILE IN LISTS TEST_SOURCES)
+            message(STATUS " \${TEST_FILE}")
+        endforeach()
+        
+        # 添加測試可執行文件
+        add_executable(run_tests \${TEST_SOURCES})
+        
+        # 添加源文件（排除main.cpp）
+        file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS \${CMAKE_SOURCE_DIR}/src/*.cpp)
+        list(FILTER LIB_SOURCES EXCLUDE REGEX ".*main\\.cpp$")
+        
+        if(LIB_SOURCES)
+            target_sources(run_tests PRIVATE \${LIB_SOURCES})
+        endif()
+        
+        # 包含頭文件路徑
+        target_include_directories(run_tests PRIVATE
+            \${CMAKE_SOURCE_DIR}/src
+            \${CMAKE_SOURCE_DIR}/tests
+        )
+        
+        # 連結第三方庫
+        LinkThirdparty(run_tests)
+        
+        # 添加測試
+        add_test(NAME AllTests COMMAND run_tests)
+        message(STATUS "已建立測試目標: run_tests")
+    else()
+        message(STATUS "未找到測試源文件，測試目標未建立")
+    endif()
+endif()
 EOL
 }
 
