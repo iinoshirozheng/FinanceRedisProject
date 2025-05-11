@@ -1,5 +1,6 @@
 #include "../infrastructure/network/TransactionHandler.hpp"
-#include "../infrastructure/network/FinancePackageHandler.hpp"
+#include "../infrastructure/network/Hcrtm01Handler.hpp"
+#include "../infrastructure/network/Hcrtm05pHandler.hpp"
 #include "../infrastructure/storage/RedisSummaryAdapter.hpp"
 #include "../infrastructure/config/ConnectionConfigProvider.hpp"
 #include "../infrastructure/config/AreaBranchProvider.hpp"
@@ -22,29 +23,11 @@ int main(int argc, char *argv[])
     {
         LOG_F(INFO, "Starting Finance Service...");
 
-        // Check if config files exist
-        std::filesystem::path connectionConfig("connection.json");
-        std::filesystem::path areaBranchConfig("area_branch.json");
-
-        if (!std::filesystem::exists(connectionConfig))
-        {
-            LOG_F(ERROR, "Required config file not found: %s", connectionConfig.c_str());
-            std::cerr << "ERROR: Required config file not found: " << connectionConfig << "\n";
-            return 1;
-        }
-
-        if (!std::filesystem::exists(areaBranchConfig))
-        {
-            LOG_F(ERROR, "Required config file not found: %s", areaBranchConfig.c_str());
-            std::cerr << "ERROR: Required config file not found: " << areaBranchConfig << "\n";
-            return 1;
-        }
-
         // Load configuration files before connecting to Redis
         LOG_F(INFO, "Loading configuration files...");
 
         // Load connection config
-        if (!infrastructure::config::ConnectionConfigProvider::loadFromFile(connectionConfig.string()))
+        if (!infrastructure::config::ConnectionConfigProvider::loadFromFile("connection.json"))
         {
             LOG_F(ERROR, "Failed to load connection configuration");
             std::cerr << "ERROR: Failed to load connection configuration\n";
@@ -52,7 +35,7 @@ int main(int argc, char *argv[])
         }
 
         // Load area branch config
-        if (!infrastructure::config::AreaBranchProvider::loadFromFile(areaBranchConfig.string()))
+        if (!infrastructure::config::AreaBranchProvider::loadFromFile("area_branch.json"))
         {
             LOG_F(ERROR, "Failed to load area branch configuration");
             std::cerr << "ERROR: Failed to load area branch configuration\n";
