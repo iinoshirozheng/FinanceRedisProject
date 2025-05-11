@@ -3,27 +3,18 @@
 #include <memory>
 #include <thread>
 #include <atomic>
-#include <mutex>
-#include <condition_variable>
-#include <vector>
 #include <Poco/Net/ServerSocket.h>
 #include <Poco/Net/StreamSocket.h>
-#include <Poco/Exception.h>
 #include "RingBuffer.hpp"
 #include "../config/ConnectionConfigProvider.hpp"
-#include "../../domain/IPackageHandler.h"
-#include "../../domain/IFinanceRepository.h"
-#include "../../domain/FinanceDataStructure.h"
+#include "../../domain/IPackageHandler.hpp"
+#include "../../domain/IFinanceRepository.hpp"
+#include "../../domain/FinanceDataStructure.hpp"
 #include "../../utils/FinanceUtils.hpp"
 #include <loguru.hpp>
 
 namespace finance::infrastructure::network
 {
-    using config::ConnectionConfigProvider;
-    using domain::ErrorResult;
-    using domain::Result;
-    using utils::FinanceUtils;
-
     static constexpr size_t RING_BUFFER_SIZE = 16 * 1024 * 1024; // 16MB
 
     class TcpServiceAdapter
@@ -86,7 +77,7 @@ namespace finance::infrastructure::network
                         clientSocket = serverSocket_.acceptConnection();
                         clientSocket.setReceiveTimeout(
                             Poco::Timespan(
-                                ConnectionConfigProvider::socketTimeoutMs() * 1000));
+                                config::ConnectionConfigProvider::socketTimeoutMs() * 1000));
 
                         while (running_)
                         {
@@ -172,11 +163,10 @@ namespace finance::infrastructure::network
                     }
 
                     // 解析並 sync
-                    auto res = handler_->processData(pkg->ap_data);
+                    auto res = handler_->handle(*pkg);
                     if (res.is_ok())
                     {
                         auto &s = res.unwrap();
-
                         const std::string key = "summary:" + s.area_center + ":" + s.stock_id;
                         auto r2 = repository_->sync(key, s);
                         if (r2.is_err())
@@ -213,4 +203,4 @@ namespace finance::infrastructure::network
         std::mutex cvMutex_;
         std::condition_variable cv_;
     };
-} // namespace finance::infrastructure::network
+}

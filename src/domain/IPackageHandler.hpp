@@ -1,7 +1,7 @@
 #pragma once
 
-#include "./FinanceDataStructure.h"
-#include "./Result.hpp"
+#include "FinanceDataStructure.hpp"
+#include "Result.hpp"
 
 namespace finance::domain
 {
@@ -10,12 +10,8 @@ namespace finance::domain
     {
     public:
         virtual ~IPackageHandler() = default;
-
-        // 處理數據
-        // @param data 要處理的數據（模板類型 T）
-        // @param optionalHeader 可選的頭部信息
-        // @return 如果處理成功則返回 true
-        virtual Result<SummaryData> processData(const struct domain::ApData &data) = 0;
+        // Only responsible for extracting ApData from the package and producing summary
+        virtual Result<SummaryData, ErrorResult> handle(const FinancePackageMessage &pkg) = 0;
     };
 
 } // namespace finance::domain

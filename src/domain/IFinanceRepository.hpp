@@ -2,7 +2,7 @@
 
 #include <string>
 #include <vector>
-#include "FinanceDataStructure.h"
+#include "FinanceDataStructure.hpp"
 #include "Result.hpp"
 
 namespace finance::domain
@@ -41,16 +41,18 @@ namespace finance::domain
         /**
          * @brief 儲存數據實體
          * @param key 鍵值，用於標識數據實體
+         * @param data 要儲存的數據
          * @return 若成功儲存返回 true，失敗返回 false
          */
-        virtual Result<void, E> set(const std::string &key) = 0;
+        virtual Result<void, E> set(const std::string &key, const T &data) = 0;
 
         /**
          * @brief 更新數據實體
          * @param key 鍵值，用於標識數據實體
+         * @param data 更新後的數據
          * @return 若成功更新返回 true，失敗返回 false
          */
-        virtual Result<void, E> update(const std::string &key) = 0;
+        virtual Result<void, E> update(const std::string &key, const T &data) = 0;
 
         /**
          * @brief 同步數據到 Redis

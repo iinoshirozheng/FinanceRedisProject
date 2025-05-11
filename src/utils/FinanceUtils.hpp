@@ -2,7 +2,7 @@
 
 #include <string>
 #include <string_view>
-#include "domain/FinanceDataStructure.h"
+#include "domain/FinanceDataStructure.hpp"
 #include <cctype>
 #include <cstring>
 #include <nlohmann/json.hpp>
