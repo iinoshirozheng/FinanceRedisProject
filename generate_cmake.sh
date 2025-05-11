@@ -77,6 +77,13 @@ option(LINK_REDIS_PLUS_PLUS "啟用 redis-plus-plus 的靜態連結" ON)
 EOL
     fi
 
+    # Check if spdlog was cloned
+    if [ -d "${SCRIPT_DIR}/third_party/spdlog" ]; then
+        cat >> "${SCRIPT_DIR}/CMakeLists.txt" << EOL
+option(LINK_SPDLOG "啟用 spdlog 日誌記錄器" ON)
+EOL
+    fi
+
     # Add status messages for enabled options
     cat >> "${SCRIPT_DIR}/CMakeLists.txt" << EOL
 
@@ -110,6 +117,12 @@ EOL
     if [ -d "${SCRIPT_DIR}/third_party/redis-plus-plus" ]; then
         cat >> "${SCRIPT_DIR}/CMakeLists.txt" << EOL
 message(STATUS " LINK_REDIS_PLUS_PLUS: \${LINK_REDIS_PLUS_PLUS}")
+EOL
+    fi
+
+    if [ -d "${SCRIPT_DIR}/third_party/spdlog" ]; then
+        cat >> "${SCRIPT_DIR}/CMakeLists.txt" << EOL
+message(STATUS " LINK_SPDLOG: \${LINK_SPDLOG}")
 EOL
     fi
 }

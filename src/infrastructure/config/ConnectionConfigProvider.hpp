@@ -4,6 +4,7 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <loguru.hpp>
+#include <mutex>
 
 namespace finance::infrastructure::config
 {

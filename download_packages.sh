@@ -86,6 +86,42 @@ clone_hiredis() {
 EOL
 }
 
+# Clone and build spdlog (header-only)
+clone_spdlog() {
+    if [ ! -d "spdlog" ]; then
+        echo "Cloning spdlog..."
+        git clone https://github.com/gabime/spdlog.git
+    else
+        update_repo "spdlog"
+    fi
+
+    cd spdlog
+    mkdir build && cd build
+    cmake -DCMAKE_INSTALL_PREFIX="${SCRIPT_DIR}/third_party/spdlog" \
+          -DSPDLOG_BUILD_SHARED=OFF \
+          -DSPDLOG_BUILD_EXAMPLE=OFF \
+          -DSPDLOG_BUILD_TESTS=OFF \
+          -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+          -DCMAKE_BUILD_TYPE=Release \
+          ..
+    make -j$(sysctl -n hw.ncpu)
+    make install
+    cd ../../
+    rm -rf spdlog
+
+    # Add spdlog CMake configuration
+    cat >> "${SCRIPT_DIR}/third_party/LinkThirdparty.cmake" << 'EOL'
+
+    # === spdlog ===
+    if(LINK_SPDLOG)
+        message(STATUS "Linking spdlog (static)...")
+        target_include_directories(${target_name} PRIVATE ${THIRD_PARTY_DIR}/spdlog/include)
+        target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/spdlog/lib/libspdlog.a)
+    endif()
+EOL
+}
+
+
 # Clone nlohmann json (header-only)
 clone_nlohmann_json() {
     if [ ! -d "nlohmann_json" ]; then
@@ -250,6 +286,7 @@ main() {
     clone_loguru
     clone_poco
     clone_redis_plus_plus
+    clone_spdlog
     
     clean_build
 
