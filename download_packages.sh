@@ -81,7 +81,15 @@ clone_hiredis() {
     if(LINK_HIREDIS)
         message(STATUS "Linking hiredis (static)...")
         target_include_directories(${target_name} PRIVATE ${THIRD_PARTY_DIR}/hiredis/include)
-        target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/hiredis/lib/libhiredis.a)
+        
+        set(lib_file "libhiredis.a")
+        if(EXISTS "${THIRD_PARTY_DIR}/hiredis/lib/${lib_file}")
+            target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/hiredis/lib/${lib_file})
+        elseif(EXISTS "${THIRD_PARTY_DIR}/hiredis/lib64/${lib_file}")
+            target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/hiredis/lib64/${lib_file})
+        else()
+            message(FATAL_ERROR "hiredis library not found in lib/ or lib64/ directories")
+        endif()
     endif()
 EOL
 }
@@ -116,7 +124,15 @@ clone_spdlog() {
     if(LINK_SPDLOG)
         message(STATUS "Linking spdlog (static)...")
         target_include_directories(${target_name} PRIVATE ${THIRD_PARTY_DIR}/spdlog/include)
-        target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/spdlog/lib/libspdlog.a)
+        
+        set(lib_file "libspdlog.a")
+        if(EXISTS "${THIRD_PARTY_DIR}/spdlog/lib/${lib_file}")
+            target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/spdlog/lib/${lib_file})
+        elseif(EXISTS "${THIRD_PARTY_DIR}/spdlog/lib64/${lib_file}")
+            target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/spdlog/lib64/${lib_file})
+        else()
+            message(FATAL_ERROR "spdlog library not found in lib/ or lib64/ directories")
+        endif()
     endif()
 EOL
 }
@@ -149,9 +165,31 @@ clone_gtest() {
     if(LINK_GTEST)
         message(STATUS "Linking GoogleTest...")
         target_include_directories(${target_name} PRIVATE ${THIRD_PARTY_DIR}/googletest/include)
+        
+        set(gtest_lib "libgtest.a")
+        set(gtest_main_lib "libgtest_main.a")
+        
+        # Check for gtest library
+        if(EXISTS "${THIRD_PARTY_DIR}/googletest/lib/${gtest_lib}")
+            set(gtest_lib_path "${THIRD_PARTY_DIR}/googletest/lib/${gtest_lib}")
+        elseif(EXISTS "${THIRD_PARTY_DIR}/googletest/lib64/${gtest_lib}")
+            set(gtest_lib_path "${THIRD_PARTY_DIR}/googletest/lib64/${gtest_lib}")
+        else()
+            message(FATAL_ERROR "Google Test library not found in lib/ or lib64/ directories")
+        endif()
+        
+        # Check for gtest_main library
+        if(EXISTS "${THIRD_PARTY_DIR}/googletest/lib/${gtest_main_lib}")
+            set(gtest_main_lib_path "${THIRD_PARTY_DIR}/googletest/lib/${gtest_main_lib}")
+        elseif(EXISTS "${THIRD_PARTY_DIR}/googletest/lib64/${gtest_main_lib}")
+            set(gtest_main_lib_path "${THIRD_PARTY_DIR}/googletest/lib64/${gtest_main_lib}")
+        else()
+            message(FATAL_ERROR "Google Test Main library not found in lib/ or lib64/ directories")
+        endif()
+        
         target_link_libraries(${target_name} PRIVATE
-            ${THIRD_PARTY_DIR}/googletest/lib/libgtest.a
-            ${THIRD_PARTY_DIR}/googletest/lib/libgtest_main.a
+            ${gtest_lib_path}
+            ${gtest_main_lib_path}
             pthread)
     endif()
 EOL
@@ -247,8 +285,13 @@ clone_poco() {
 
         set(DETECTED_POCO_MODULES "")
         foreach(module ${PocoModules})
-            if(EXISTS "${THIRD_PARTY_DIR}/poco/lib/libPoco${module}.a")
+            set(lib_file "libPoco${module}.a")
+            if(EXISTS "${THIRD_PARTY_DIR}/poco/lib/${lib_file}")
                 list(APPEND DETECTED_POCO_MODULES ${module})
+                set(POCO_${module}_LIB_PATH "${THIRD_PARTY_DIR}/poco/lib/${lib_file}")
+            elseif(EXISTS "${THIRD_PARTY_DIR}/poco/lib64/${lib_file}")
+                list(APPEND DETECTED_POCO_MODULES ${module})
+                set(POCO_${module}_LIB_PATH "${THIRD_PARTY_DIR}/poco/lib64/${lib_file}")
             endif()
         endforeach()
 
@@ -256,7 +299,7 @@ clone_poco() {
         target_include_directories(${target_name} PRIVATE ${THIRD_PARTY_DIR}/poco/include)
 
         foreach(module ${DETECTED_POCO_MODULES})
-            target_link_libraries(${target_name} PRIVATE "${THIRD_PARTY_DIR}/poco/lib/libPoco${module}.a")
+            target_link_libraries(${target_name} PRIVATE "${POCO_${module}_LIB_PATH}")
             message(STATUS "Linked Poco${module} (static)")
         endforeach()
 
@@ -297,7 +340,15 @@ clone_redis_plus_plus() {
 
         message(STATUS "Linking hiredis (static)...")
         target_include_directories(${target_name} PRIVATE ${THIRD_PARTY_DIR}/hiredis/include)
-        target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/hiredis/lib/libhiredis.a)
+        
+        set(hiredis_lib "libhiredis.a")
+        if(EXISTS "${THIRD_PARTY_DIR}/hiredis/lib/${hiredis_lib}")
+            target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/hiredis/lib/${hiredis_lib})
+        elseif(EXISTS "${THIRD_PARTY_DIR}/hiredis/lib64/${hiredis_lib}")
+            target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/hiredis/lib64/${hiredis_lib})
+        else()
+            message(FATAL_ERROR "hiredis library not found in lib/ or lib64/ directories")
+        endif()
 
         message(STATUS "Linking redis-plus-plus (static)...")
         # Make sure hiredis is linked first as it's a dependency
@@ -306,7 +357,15 @@ clone_redis_plus_plus() {
         endif()
         
         target_include_directories(${target_name} PRIVATE ${THIRD_PARTY_DIR}/redis-plus-plus/include)
-        target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/redis-plus-plus/lib/libredis++.a)
+        
+        set(redis_lib "libredis++.a")
+        if(EXISTS "${THIRD_PARTY_DIR}/redis-plus-plus/lib/${redis_lib}")
+            target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/redis-plus-plus/lib/${redis_lib})
+        elseif(EXISTS "${THIRD_PARTY_DIR}/redis-plus-plus/lib64/${redis_lib}")
+            target_link_libraries(${target_name} PRIVATE ${THIRD_PARTY_DIR}/redis-plus-plus/lib64/${redis_lib})
+        else()
+            message(FATAL_ERROR "redis-plus-plus library not found in lib/ or lib64/ directories")
+        endif()
     endif()
 EOL
 }

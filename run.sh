@@ -11,6 +11,7 @@ cd "$SCRIPT_DIR"
 BUILD_DIR="build"
 CONFIG_FILES=("connection.json" "area_branch.json")
 REDIS_PORT=6379
+RUN_TESTS=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -30,6 +31,42 @@ print_warning() {
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    key="$1"
+    case $key in
+        --test|-t)
+            RUN_TESTS=true
+            shift
+            ;;
+        *)
+            # Unknown option
+            shift
+            ;;
+    esac
+done
+
+# If running tests only, use the simplified test build
+if $RUN_TESTS; then
+    print_status "Building and running tests only..."
+    
+    # Build and run tests
+    cd "$SCRIPT_DIR/tests"
+    mkdir -p build
+    cd build
+    cmake .. -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_STANDARD_REQUIRED=ON
+    make -j$(sysctl -n hw.ncpu)
+    
+    if [ $? -eq 0 ]; then
+        print_status "Tests built successfully. Running tests..."
+        ./basic_tests
+        exit $?
+    else
+        print_error "Test build failed!"
+        exit 1
+    fi
+fi
 
 check_redis() {
     if ! nc -z localhost $REDIS_PORT &>/dev/null; then
@@ -64,12 +101,24 @@ print_status "Building project..."
 rm -rf "$BUILD_DIR"/* 2>/dev/null || true
 
 # Configure and build
-cmake -S . -B "$BUILD_DIR"
+cmake -S . -B "$BUILD_DIR" -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_STANDARD_REQUIRED=ON
 cd "$BUILD_DIR"
 make -j$(sysctl -n hw.ncpu)
 
 if [ $? -eq 0 ]; then
     print_status "Build successful!"
+    
+    # Run tests if requested
+    if $RUN_TESTS; then
+        print_status "Running tests using integrated test framework..."
+        if [ -f "./run_tests" ]; then
+            ./run_tests
+            print_status "Tests completed."
+            exit 0
+        else
+            print_warning "Integrated test executable not found, skipping tests."
+        fi
+    fi
     
     # Check dependencies
     check_redis
