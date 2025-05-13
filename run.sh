@@ -1,145 +1,105 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 
-# Exit on error
-set -e
-
-# Script directory
+# === 路徑設定 ===
+# 取得腳本自身所在目錄（不管從哪裡呼叫都正確）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+PROJECT_DIR="${SCRIPT_DIR}"
+CMAKE_FILE="${PROJECT_DIR}/CMakeLists.txt"
 
-# Configuration
-BUILD_DIR="build"
-CONFIG_FILES=("connection.json" "area_branch.json")
-REDIS_PORT=6379
-RUN_TESTS=false
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Helper functions
-print_status() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    key="$1"
-    case $key in
-        --test|-t)
-            RUN_TESTS=true
-            shift
-            ;;
-        *)
-            # Unknown option
-            shift
-            ;;
-    esac
-done
-
-# If running tests only, use the simplified test build
-if $RUN_TESTS; then
-    print_status "Building and running tests only..."
-    
-    # Build and run tests
-    cd "$SCRIPT_DIR/tests"
-    mkdir -p build
-    cd build
-    cmake .. -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_STANDARD_REQUIRED=ON
-    make -j$(sysctl -n hw.ncpu)
-    
-    if [ $? -eq 0 ]; then
-        print_status "Tests built successfully. Running tests..."
-        ./basic_tests
-        exit $?
-    else
-        print_error "Test build failed!"
-        exit 1
-    fi
+# 確認 CMakeLists.txt 存在
+if [ ! -f "${CMAKE_FILE}" ]; then
+    echo "❌ 無法找到 ${CMAKE_FILE}，請確認專案根目錄下有 CMakeLists.txt"
+    exit 1
 fi
 
-check_redis() {
-    if ! nc -z localhost $REDIS_PORT &>/dev/null; then
-        print_warning "Redis is not running on port $REDIS_PORT"
-        print_warning "You can install Redis with: brew install redis"
-        print_warning "And start it with: brew services start redis"
-        return 1
-    fi
-    return 0
-}
+# 從 CMakeLists.txt 裡解析 project 名稱 (第一個參數)
+PROJECT_NAME="$(grep -E '^[[:space:]]*project\(' "${CMAKE_FILE}" \
+               | head -n1 \
+               | sed -E 's/^[[:space:]]*project\(\s*([A-Za-z0-9_]+).*/\1/')"
 
-check_config_files() {
-    local missing_files=()
-    for file in "${CONFIG_FILES[@]}"; do
-        if [[ ! -f "$file" ]]; then
-            missing_files+=("$file")
-        fi
-    done
-    
-    if [[ ${#missing_files[@]} -gt 0 ]]; then
-        print_warning "Missing configuration files: ${missing_files[*]}"
-        print_warning "Please ensure these files exist in the root directory"
-        return 1
-    fi
-    return 0
-}
+# 目錄變數
+BUILD_DIR="${PROJECT_DIR}/build"
+BIN_DIR="${PROJECT_DIR}/bin"
 
-# Main build process
-print_status "Building project..."
+# === 預設值 ===
+RUN_TESTS=false
 
-# Clean build directory
-rm -rf "$BUILD_DIR"/* 2>/dev/null || true
+# === 參數解析 ===
+for arg in "$@"; do
+  case $arg in
+    --test)
+      RUN_TESTS=true
+      shift
+      ;;
+    *)
+      ;;
+  esac
+done
 
-# Configure and build
-cmake -S . -B "$BUILD_DIR" -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_STANDARD_REQUIRED=ON
-cd "$BUILD_DIR"
-make -j$(sysctl -n hw.ncpu)
-
-if [ $? -eq 0 ]; then
-    print_status "Build successful!"
-    
-    # Run tests if requested
-    if $RUN_TESTS; then
-        print_status "Running tests using integrated test framework..."
-        if [ -f "./run_tests" ]; then
-            ./run_tests
-            print_status "Tests completed."
-            exit 0
-        else
-            print_warning "Integrated test executable not found, skipping tests."
-        fi
-    fi
-    
-    # Check dependencies
-    check_redis
-    check_config_files
-    
-    echo ""
-    print_status "The application requires the following dependencies to run correctly:"
-    echo "  - Redis server (default port $REDIS_PORT)"
-    echo "  - Configuration files (${CONFIG_FILES[*]})"
-    echo ""
-    
-    echo "Do you want to run the application now? (y/n)"
-    read -r answer
-    if [[ "$answer" =~ ^[Yy]$ ]]; then
-        print_status "Running CACB..."
-        cd "$SCRIPT_DIR"
-        ./"$BUILD_DIR"/CACB "$@"
-    else
-        print_status "Exiting without running the application."
-    fi
-else
-    print_error "Build failed!"
+# === 清理舊的 build 目錄 ===
+if [ -d "${BUILD_DIR}" ]; then
+  echo "🗑️ 發現已存在的 build 目錄，正在移除..."
+  rm -rf "${BUILD_DIR}" || {
+    echo "❌ 無法移除 build 目錄！請檢查權限。"
     exit 1
-fi 
+  }
+fi
+
+# === 建立 bin 目錄 if needed ===
+if [ ! -d "${BIN_DIR}" ]; then
+  echo "📁 找不到 bin 目錄，正在建立..."
+  mkdir -p "${BIN_DIR}" || {
+    echo "❌ 無法建立 bin 目錄！"
+    exit 1
+  }
+else
+  echo "📁 已存在 bin 目錄，繼續…"
+fi
+
+# === 建置步驟 ===
+echo "📦 建立新的 build 目錄: ${BUILD_DIR}"
+mkdir -p "${BUILD_DIR}" || {
+  echo "❌ 無法建立 build 目錄！"
+  exit 1
+}
+cd "${BUILD_DIR}" || {
+  echo "❌ 無法進入 build 目錄！"
+  exit 1
+}
+
+echo "⚙️ 執行 CMake 配置…"
+if [ "${RUN_TESTS}" = false ]; then
+  cmake -DBUILD_TESTS=OFF -DLINK_GTEST=OFF .. || {
+    echo "❌ CMake 配置失敗！"
+    exit 1
+  }
+else
+  echo "✅ 啟用測試模式…"
+  cmake -DBUILD_TESTS=ON -DLINK_GTEST=ON .. || {
+    echo "❌ CMake 配置失敗！"
+    exit 1
+  }
+fi
+
+echo "🔨 編譯中…"
+cmake --build . || {
+  echo "❌ 編譯失敗！"
+  exit 1
+}
+
+echo "✅ 建置完成！"
+
+# === 執行測試 or 主程式 ===
+if [ "${RUN_TESTS}" = true ]; then
+  echo "🧪 執行單元測試…"
+  cd "${BUILD_DIR}"
+  ./run_tests || {
+    echo "❌ 測試失敗！"
+    exit 1
+  }
+else
+  echo "🚀 執行 ${PROJECT_NAME}…"
+  cp "${BUILD_DIR}/cmake/${PROJECT_NAME}" "${BIN_DIR}/${PROJECT_NAME}"
+  cd "${BIN_DIR}"
+  "./${PROJECT_NAME}"
+fi
