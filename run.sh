@@ -92,7 +92,7 @@ echo "✅ 建置完成！"
 # === 執行測試 or 主程式 ===
 if [ "${RUN_TESTS}" = true ]; then
   echo "🧪 執行單元測試…"
-  cd "${BUILD_DIR}"
+  cd "${BUILD_DIR}/cmake"
   ./run_tests || {
     echo "❌ 測試失敗！"
     exit 1

@@ -18,7 +18,7 @@ function(DefineGlobalOptions)
     option(LINK_LOGURU "Enable Loguru logger" ON)
     option(LINK_NLOHMANN_JSON "Enable nlohmann/json" ON)
     option(LINK_REDIS_PLUS_PLUS "Enable redis-plus-plus static link" ON)
-    option(LINK_SPDLOG "Enable spdlog logger" ON)
+    option(LINK_SPDLOG "Enable spdlog logger" OFF)
     option(LINK_GTEST "Enable Google Test framework" ON)
     option(BUILD_TESTS "Build unit tests" ON)
 

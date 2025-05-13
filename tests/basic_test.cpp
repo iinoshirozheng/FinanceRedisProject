@@ -32,4 +32,3 @@ TEST(BasicTest, StdVariant)
     EXPECT_TRUE(std::holds_alternative<std::string>(var));
     EXPECT_EQ(std::get<std::string>(var), "test");
 }
-
