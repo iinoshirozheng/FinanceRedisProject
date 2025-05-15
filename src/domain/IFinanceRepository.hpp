@@ -36,7 +36,7 @@ namespace finance::domain
          * @param key 鍵值，用於標識數據實體
          * @return 若成功儲存返回 true，失敗返回 false
          */
-        virtual Result<T, E> get(const std::string &key) = 0;
+        virtual Result<T *, E> getData(const std::string &key) = 0;
 
         /**
          * @brief 儲存數據實體
@@ -44,7 +44,7 @@ namespace finance::domain
          * @param data 要儲存的數據
          * @return 若成功儲存返回 true，失敗返回 false
          */
-        virtual Result<void, E> set(const std::string &key, const T &data) = 0;
+        virtual Result<void, E> setData(const std::string &key, const T &data) = 0;
 
         /**
          * @brief 更新數據實體
@@ -52,7 +52,7 @@ namespace finance::domain
          * @param data 更新後的數據
          * @return 若成功更新返回 true，失敗返回 false
          */
-        virtual Result<void, E> update(const std::string &key, const T &data) = 0;
+        virtual Result<void, E> update(const std::string &key) = 0;
 
         /**
          * @brief 同步數據到 Redis
@@ -60,7 +60,7 @@ namespace finance::domain
          * @param data 要同步的數據
          * @return 同步結果
          */
-        virtual Result<void, E> sync(const std::string &key, const T &data) = 0;
+        virtual Result<void, E> sync(const std::string &key, const T *data) = 0;
 
         /**
          * @brief 刪除數據實體

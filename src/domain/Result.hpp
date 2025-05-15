@@ -27,7 +27,9 @@ namespace finance::domain
         TcpStartFailed,         // TCP 服務啟動失敗
         InvalidPacket,          // 無效封包
         UnknownTransactionCode, // 未知的交易代碼
-        InternalError           // 內部錯誤
+        InternalError,          // 內部錯誤
+        UnexpectedError,        // 未知錯誤
+        GetDataNull             // Null ptr
     };
 
     /**
@@ -164,9 +166,10 @@ namespace finance::domain
          * @param f 映射函數（應用於成功值）
          * @return 映射後的 Result（成功或失敗）
          */
-        template <typename U>
-        Result<U, E> map(std::function<U(const T &)> f) const
+        template <typename Func>
+        auto map(Func &&f) const -> Result<std::invoke_result_t<Func, const T &>, E>
         {
+            using U = std::invoke_result_t<Func, const T &>;
             if (is_ok_)
                 return Result<U, E>::Ok(f(std::get<T>(value_)));
             return Result<U, E>::Err(std::get<E>(value_));

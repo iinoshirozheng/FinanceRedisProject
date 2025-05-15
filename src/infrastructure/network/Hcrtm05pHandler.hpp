@@ -1,12 +1,12 @@
 #pragma once
 
-#include "../../domain/IPackageHandler.hpp"
-#include "../../domain/FinanceDataStructure.hpp"
-#include "../../domain/Result.hpp"
-#include "../../domain/IFinanceRepository.hpp"
-#include "../../utils/LogHelper.hpp"
-#include "../../utils/FinanceUtils.hpp"
-#include "../config/AreaBranchProvider.hpp"
+#include "domain/IPackageHandler.hpp"
+#include "domain/FinanceDataStructure.hpp"
+#include "domain/Result.hpp"
+#include "domain/IFinanceRepository.hpp"
+#include "utils/LogHelper.hpp"
+#include "utils/FinanceUtils.hpp"
+#include "infrastructure/config/AreaBranchProvider.hpp"
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -29,72 +29,73 @@ namespace finance::infrastructure::network
         explicit Hcrtm05pHandler(std::shared_ptr<IFinanceRepository<SummaryData, ErrorResult>> repo)
             : repo_(std::move(repo)) {}
 
-        Result<SummaryData, ErrorResult> handle(const FinancePackageMessage &pkg) override
+        Result<void, ErrorResult> handle(const FinancePackageMessage &pkg) override
         {
             LOG_F(INFO, "Hcrtm05pHandler::handle");
 
-            const auto &h = pkg.ap_data.data.hcrtm05p;
+            const auto &hcrtm05p = pkg.ap_data.data.hcrtm05p;
 
             // Extract stock_id and broker_id
-            std::string stock_id = FinanceUtils::trim_right(h.stock_id, sizeof(h.stock_id));
-            std::string broker_id = FinanceUtils::trim_right(h.broker_id, sizeof(h.broker_id));
+            std::string stock_id = FinanceUtils::trim_right(hcrtm05p.stock_id, sizeof(hcrtm05p.stock_id));
+            std::string area_center = FinanceUtils::trim_right(hcrtm05p.broker_id, sizeof(hcrtm05p.broker_id));
 
             // Validate broker_id
-            if (broker_id.empty())
+
+            if (!config::AreaBranchProvider::IsValidAreaCenter(area_center))
             {
                 LOG_F(ERROR, "Invalid broker_id for stock_id=%s", stock_id.c_str());
-                return Result<SummaryData, ErrorResult>::Err(
-                    ErrorResult{ErrorCode::InvalidPacket, "Invalid broker_id"});
+                return Result<void, ErrorResult>::Err(ErrorResult{ErrorCode::InvalidPacket, "Invalid broker_id"});
             }
 
-            // Convert BCD to integers
-            int64_t margin_buy_offset_qty = FinanceUtils::backOfficeToInt(h.margin_buy_offset_qty, sizeof(h.margin_buy_offset_qty));
-            int64_t short_sell_offset_qty = FinanceUtils::backOfficeToInt(h.short_sell_offset_qty, sizeof(h.short_sell_offset_qty));
-
-            // Create summary data
-            SummaryData summary;
-            summary.stock_id = stock_id;
-            summary.area_center = broker_id;
-
-            // Set quantities based on offsets
-            summary.margin_available_qty = margin_buy_offset_qty;
-            summary.after_margin_available_qty = margin_buy_offset_qty;
-            summary.short_available_qty = short_sell_offset_qty;
-            summary.after_short_available_qty = short_sell_offset_qty;
-
-            // Add branch information
-            summary.belong_branches = config::AreaBranchProvider::getBranchesForArea(summary.area_center);
-
-            LOG_F(INFO, "Processed stock_id=%s, broker_id=%s, margin_buy_offset_qty=%lld, short_sell_offset_qty=%lld",
-                  summary.stock_id.c_str(), summary.area_center.c_str(), margin_buy_offset_qty, short_sell_offset_qty);
+            // Convert integers
+            int64_t margin_buy_offset_qty = FinanceUtils::backOfficeToInt(hcrtm05p.margin_buy_offset_qty, sizeof(hcrtm05p.margin_buy_offset_qty));
+            int64_t short_sell_offset_qty = FinanceUtils::backOfficeToInt(hcrtm05p.short_sell_offset_qty, sizeof(hcrtm05p.short_sell_offset_qty));
 
             // Try to get existing data to merge any other fields we don't know about
-            auto existing = repo_->get(summary.stock_id);
+
+            auto existing = repo_->getData(stock_id);
             if (existing.is_err())
             {
-                LOG_F(ERROR, "Failed to get data for stock_id=%s", summary.stock_id.c_str());
-                return Result<SummaryData, ErrorResult>::Err(existing.unwrap_err());
+                LOG_F(ERROR, "Failed to get data for stock_id=%s", stock_id.c_str());
+                return Result<void, ErrorResult>::Err(existing.unwrap_err());
             }
 
-            // Preserve any existing data fields not in the message
-            auto data = existing.unwrap();
+            domain::SummaryData *summary_data = existing.unwrap();
+            if (summary_data == nullptr)
+            {
+                LOG_F(ERROR, "Hcrtm05pHandler:Unexpact Summary Data null, StockId=%s", stock_id.c_str());
+                return Result<void, ErrorResult>::Err(
+                    ErrorResult{ErrorCode::UnexpectedError, "Hcrtm05pHandler:summary_data = nullptr"});
+            }
+
+            // Create summary data
+            summary_data->stock_id = stock_id;
+            summary_data->area_center = area_center;
+            summary_data->margin_buy_offset_qty = margin_buy_offset_qty;
+            summary_data->short_sell_offset_qty = short_sell_offset_qty;
+
+            LOG_F(INFO, "Processed stock_id=%s, broker_id=%s, margin_buy_offset_qty=%lld, short_sell_offset_qty=%lld",
+                  stock_id.c_str(), area_center.c_str(), margin_buy_offset_qty, short_sell_offset_qty);
 
             // Update with new values from the message
-            data.area_center = summary.area_center;
-            data.margin_available_qty = summary.margin_available_qty;
-            data.after_margin_available_qty = summary.after_margin_available_qty;
-            data.short_available_qty = summary.short_available_qty;
-            data.after_short_available_qty = summary.after_short_available_qty;
-            data.belong_branches = summary.belong_branches;
+            summary_data->stock_id = stock_id;
+            summary_data->area_center = area_center;
+            summary_data->margin_available_qty += margin_buy_offset_qty;
+            summary_data->short_available_qty += short_sell_offset_qty;
+            summary_data->after_margin_available_qty += margin_buy_offset_qty;
+            summary_data->after_short_available_qty += short_sell_offset_qty;
+            // 暫存 資買互抵
+            summary_data->margin_buy_offset_qty = margin_buy_offset_qty;
+            summary_data->short_sell_offset_qty = short_sell_offset_qty;
 
             // Use set() to store the modified data
-            auto set_result = repo_->set(summary.stock_id, data);
-            if (!set_result.is_ok())
+            auto set_result = repo_->sync(stock_id, summary_data);
+            if (set_result.is_err())
             {
-                LOG_F(ERROR, "Failed to update data for stock_id=%s", summary.stock_id.c_str());
-                return Result<SummaryData, ErrorResult>::Err(set_result.unwrap_err());
+                LOG_F(ERROR, "Failed to update data for stock_id=%s", stock_id.c_str());
+                return Result<void, ErrorResult>::Err(set_result.unwrap_err());
             }
-            return Result<SummaryData, ErrorResult>::Ok(data);
+            return Result<void, ErrorResult>::Ok();
         }
 
     private:

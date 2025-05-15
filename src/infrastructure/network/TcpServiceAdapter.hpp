@@ -6,11 +6,11 @@
 #include <Poco/Net/ServerSocket.h>
 #include <Poco/Net/StreamSocket.h>
 #include "RingBuffer.hpp"
-#include "../config/ConnectionConfigProvider.hpp"
-#include "../../domain/IPackageHandler.hpp"
-#include "../../domain/IFinanceRepository.hpp"
-#include "../../domain/FinanceDataStructure.hpp"
-#include "../../utils/FinanceUtils.hpp"
+#include "infrastructure/config/ConnectionConfigProvider.hpp"
+#include "domain/IPackageHandler.hpp"
+#include "domain/IFinanceRepository.hpp"
+#include "domain/FinanceDataStructure.hpp"
+#include "utils/FinanceUtils.hpp"
 #include <loguru.hpp>
 
 namespace finance::infrastructure::network
@@ -29,7 +29,7 @@ namespace finance::infrastructure::network
         {
             serverSocket_.setReuseAddress(true);
             serverSocket_.setReusePort(true);
-            serverSocket_.setReceiveTimeout(Poco::Timespan(config::ConnectionConfigProvider::socketTimeoutMs() * 1000));
+            // serverSocket_.setReceiveTimeout(Poco::Timespan(config::ConnectionConfigProvider::socketTimeoutMs() * 1000));
         }
 
         ~TcpServiceAdapter()
@@ -50,9 +50,6 @@ namespace finance::infrastructure::network
 
         void stop()
         {
-            if (!running_)
-                return;
-
             running_ = false;
             serverSocket_.close();
             cv_.notify_all();
@@ -68,43 +65,38 @@ namespace finance::infrastructure::network
         {
             try
             {
-                Poco::Net::StreamSocket clientSocket;
-
                 while (running_)
                 {
-                    try
+
+                    Poco::Net::StreamSocket clientSocket = serverSocket_.acceptConnection();
+                    if (!clientSocket.impl()->initialized())
                     {
-                        clientSocket = serverSocket_.acceptConnection();
-                        clientSocket.setReceiveTimeout(
-                            Poco::Timespan(
-                                config::ConnectionConfigProvider::socketTimeoutMs() * 1000));
+                        LOG_F(ERROR, "clientSocket initialized failed !");
+                        continue;
+                    }
+                    // clientSocket.setReceiveTimeout( Poco::Timespan(config::ConnectionConfigProvider::socketTimeoutMs() * 1000));
 
-                        while (running_)
+                    while (running_)
+                    {
+                        // 1) 先拿到可連續寫入的位置與長度
+                        size_t maxLen;
+                        char *writePtr = ringBuffer_.writablePtr(maxLen);
+                        if (maxLen == 0)
                         {
-                            // 1) 先拿到可連續寫入的位置與長度
-                            size_t maxLen;
-                            char *writePtr = ringBuffer_.writablePtr(maxLen);
-                            if (maxLen == 0)
-                            {
-                                // 緩衝區滿，輕自旋或稍微 sleep
-                                std::this_thread::yield();
-                                continue;
-                            }
+                            // 緩衝區滿，輕自旋或稍微 sleep
+                            std::this_thread::yield();
+                            continue;
+                        }
 
-                            // 2) 直接從 socket 讀到這塊記憶體
-                            int n = clientSocket.receiveBytes(writePtr, maxLen);
-                            if (n <= 0)
-                                break;
-
+                        // 2) 直接從 socket 讀到這塊記憶體
+                        size_t n = clientSocket.receiveBytes(writePtr, maxLen);
+                        if (n > 0)
+                        {
                             // 3) 發佈寫入長度
-                            ringBuffer_.enqueue(static_cast<size_t>(n));
+                            LOG_F(INFO, "Get Data : %zu", n);
+                            ringBuffer_.enqueue(n);
                             cv_.notify_one();
                         }
-                    }
-                    catch (const Poco::Exception &e)
-                    {
-                        if (running_)
-                            LOG_F(ERROR, "Socket error: %s", e.displayText().c_str());
                     }
                 }
             }
@@ -164,23 +156,15 @@ namespace finance::infrastructure::network
 
                     // 解析並 sync
                     auto res = handler_->handle(*pkg);
-                    if (res.is_ok())
-                    {
-                        auto &s = res.unwrap();
-                        const std::string key = "summary:" + s.area_center + ":" + s.stock_id;
-                        auto r2 = repository_->sync(key, s);
-                        if (r2.is_err())
-                        {
-                            LOG_F(ERROR, "Redis sync 失敗 key=%s: %s",
-                                  key.c_str(), r2.unwrap_err().message.c_str());
-                        }
-                    }
-                    else
+                    if (res.is_err())
                     {
                         LOG_F(ERROR, "封包解析失敗: %s", res.unwrap_err().message.c_str());
                     }
 
-                    ringBuffer_.dequeue(seg.totalLen());
+                    int len = seg.totalLen();
+                    LOG_F(INFO, "dequeue totalLen = %d", len);
+
+                    ringBuffer_.dequeue(len);
                 }
             }
             catch (const std::exception &e)

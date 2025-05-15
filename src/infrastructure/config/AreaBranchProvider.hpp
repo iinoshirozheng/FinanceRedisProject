@@ -3,10 +3,13 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <loguru.hpp>
 #include <mutex>
+#include <algorithm>
+#include <vector> // 包含 vector
 
 namespace finance::infrastructure::config
 {
@@ -14,36 +17,38 @@ namespace finance::infrastructure::config
     class AreaBranchProvider
     {
     public:
-        // 單次從 JSON 檔載入設定並初始化靜態快取
         inline static bool loadFromFile(const std::string &filePath)
         {
             try
             {
                 std::call_once(initFlag_, [&]()
                                {
-                std::ifstream ifs(filePath);
-                if (!ifs) throw std::runtime_error("Cannot open config file: " + filePath);
+                    std::ifstream ifs(filePath);
+                    if (!ifs) throw std::runtime_error("Cannot open config file: " + filePath);
 
-                jsonData_ = nlohmann::json::parse(ifs);
-                if (!jsonData_.is_object()) throw std::runtime_error("Invalid JSON format: expected object");
+                    jsonData_ = nlohmann::json::parse(ifs);
+                    if (!jsonData_.is_object()) throw std::runtime_error("Invalid JSON format: expected object");
 
-                // 清理舊資料
-                backofficeIds_.clear();
-                allBranches_.clear();
-                followingBrokerIds_.clear();
-                areaToBranches_.clear();
+                    backofficeIdsSet_.clear();
+                    allBranchesSet_.clear(); // 改為 unordered_set
+                    followingBrokerIdsSet_.clear(); // 改為 unordered_set
+                    areaToBranches_.clear();
 
-                // 解析各區域與分支，並填充快取映射
-                for (auto& [areaId, branches] : jsonData_.items()) {
-                    backofficeIds_.push_back(areaId);  // 記錄區域 ID
-                    auto& vec = areaToBranches_[areaId];
-                    for (auto& b : branches) {
-                        std::string branchId = b.get<std::string>();
-                        vec.push_back(branchId);           // 快取分支列表
-                        allBranches_.push_back(branchId);  // 全部分支列表
-                        followingBrokerIds_.push_back(branchId);
+                    for (auto& [areaId, branches] : jsonData_.items())
+                    {
+                        backofficeIdsSet_.insert(areaId);
+                        auto& vec = areaToBranches_[areaId];
+                        for (auto& b : branches) {
+                            std::string branchId = b.get<std::string>();
+                            vec.push_back(branchId);
+                            allBranchesSet_.insert(branchId); // 插入到 unordered_set
+                            followingBrokerIdsSet_.insert(branchId); // 插入到 unordered_set
+                        }
                     }
-                } });
+                    // *** 新增：將所有分支 ID 從 set 複製到 vector ***
+                    allBranchesVec_.assign(allBranchesSet_.begin(), allBranchesSet_.end());
+                    backofficeIdsVec_.assign(backofficeIdsSet_.begin(), backofficeIdsSet_.end()); });
+
                 return true;
             }
             catch (const std::exception &e)
@@ -53,7 +58,6 @@ namespace finance::infrastructure::config
             }
         }
 
-        // 返回某區域下的所有分支，若不存在返回空集合
         inline static const std::vector<std::string> &getBranchesForArea(const std::string &areaId)
         {
             auto it = areaToBranches_.find(areaId);
@@ -65,30 +69,26 @@ namespace finance::infrastructure::config
             return emptyVec;
         }
 
-        // 返回所有分支 ID
-        inline static const std::vector<std::string> &getAllBranches()
-        {
-            return allBranches_;
-        }
+        // 新增：返回所有分支 ID 的 vector
+        inline static const std::vector<std::string> &getAllBranches() { return allBranchesVec_; }
 
-        // 返回所有區域 ID
-        inline static const std::vector<std::string> &getBackofficeIds()
-        {
-            return backofficeIds_;
-        }
+        // 返回所有分支 ID (改為檢查是否存在)
+        inline static bool IsBranchValid(const std::string &branchId) { return allBranchesSet_.count(branchId) > 0; }
 
-        // 返回所有分支對應列表
-        inline static const std::vector<std::string> &getFollowingBrokerIds()
-        {
-            return followingBrokerIds_;
-        }
+        inline static const std::vector<std::string> &getBackofficeIds() { return backofficeIdsVec_; }
+        // 返回所有分支對應列表 (改為檢查是否存在)
+        inline static bool IsFollowingBrokerId(const std::string &brokerId) { return followingBrokerIdsSet_.count(brokerId) > 0; }
+
+        inline static bool IsValidAreaCenter(const std::string &area) { return backofficeIdsSet_.count(area) > 0; }
 
     private:
         inline static std::once_flag initFlag_{};
         inline static nlohmann::json jsonData_{};
-        inline static std::vector<std::string> backofficeIds_{};
-        inline static std::vector<std::string> allBranches_{};
-        inline static std::vector<std::string> followingBrokerIds_{};
+        inline static std::unordered_set<std::string> backofficeIdsSet_{};
+        inline static std::vector<std::string> backofficeIdsVec_{};
+        inline static std::unordered_set<std::string> allBranchesSet_{};        // 改為 unordered_set
+        inline static std::vector<std::string> allBranchesVec_{};               // *** 新增：儲存所有分支 ID 的 vector ***
+        inline static std::unordered_set<std::string> followingBrokerIdsSet_{}; // 改為 unordered_set
         inline static std::unordered_map<std::string, std::vector<std::string>> areaToBranches_{};
     };
 

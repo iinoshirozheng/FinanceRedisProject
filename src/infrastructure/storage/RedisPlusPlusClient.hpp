@@ -6,7 +6,7 @@
 #include <memory>
 #include <chrono>
 #include <sw/redis++/redis++.h>
-#include "../../domain/Result.hpp"
+#include "domain/Result.hpp"
 #include <loguru.hpp>
 
 namespace finance::infrastructure::storage
@@ -30,25 +30,8 @@ namespace finance::infrastructure::storage
 
         inline ~RedisPlusPlusClient() { disconnect(); }
 
-        inline Result<void, E> setConnectOption(size_t poolSize, int waitTimeoutMs)
-        {
-            if (redis_)
-            {
-                return Result<void, E>::Err({ErrorCode::RedisConnectionFailed,
-                                             "Cannot change options after connection is established"});
-            }
-            if (poolSize == 0 || waitTimeoutMs <= 0)
-            {
-                return Result<void, E>::Err({ErrorCode::InvalidPacket,
-                                             "Invalid poolSize or waitTimeoutMs"});
-            }
-            poolSize_ = poolSize;
-            waitTimeoutMs_ = waitTimeoutMs;
-            return Result<void, E>::Ok();
-        }
-
         // 以 host+port 連線
-        inline Result<void, E> connect(const std::string &host, int port)
+        inline Result<void, E> connect(const std::string &host, int port, const std::string &password = "")
         {
             if (redis_)
                 return Result<void, E>::Ok();
@@ -57,13 +40,14 @@ namespace finance::infrastructure::storage
                 ConnectionOptions opts;
                 opts.host = host;
                 opts.port = port;
+                opts.password = password;
                 opts.keep_alive = true;
-                ConnectionPoolOptions pool_opts;
-                pool_opts.size = poolSize_;
-                pool_opts.wait_timeout = std::chrono::milliseconds(waitTimeoutMs_);
-                redis_ = std::make_unique<Redis>(opts, pool_opts);
-                LOG_F(INFO, "Redis connected: %s:%d (pool %zu)",
-                      host.c_str(), port, poolSize_);
+                LOG_F(INFO, "Redis connecting to host : %s", host.c_str());
+                LOG_F(INFO, "Redis connecting to port : %d", port);
+
+                redis_ = std::make_unique<Redis>(opts);
+                LOG_F(INFO, "Redis connected: %s:%d (AUTH %s)", host.c_str(), port, password.c_str());
+
                 return Result<void, E>::Ok();
             }
             catch (const std::exception &ex)
@@ -73,8 +57,8 @@ namespace finance::infrastructure::storage
             }
         }
 
-        // 以 URL 連線，例如 "tcp://127.0.0.1:6379"
-        inline Result<void, E> connect(const std::string &url)
+        // 以 URL 連線，例如 "tcp://127.0.0.1:6666"
+        inline Result<void, E> connect(const std::string &url, const std::string &password = "")
         {
             // 解析 host & port
             std::string u = url;
@@ -83,7 +67,7 @@ namespace finance::infrastructure::storage
             auto pos = u.find(':');
             std::string host = u.substr(0, pos);
             int port = (pos != std::string::npos) ? std::stoi(u.substr(pos + 1)) : 6379;
-            return connect(host, port);
+            return connect(host, port, password);
         }
 
         inline Result<void, E> disconnect()

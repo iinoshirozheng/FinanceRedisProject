@@ -1,11 +1,11 @@
 #pragma once
 
-#include "../../domain/IPackageHandler.hpp"
-#include "../../domain/Result.hpp"
-#include "../../domain/FinanceDataStructure.hpp"
+#include "domain/IPackageHandler.hpp"
+#include "domain/Result.hpp"
+#include "domain/FinanceDataStructure.hpp"
 #include "Hcrtm01Handler.hpp"
 #include "Hcrtm05pHandler.hpp"
-#include "../../utils/FinanceUtils.hpp"
+#include "utils/FinanceUtils.hpp"
 #include <string>
 #include <unordered_map>
 #include <memory>
@@ -30,12 +30,12 @@ namespace finance::infrastructure::network
         }
 
         // Implement IPackageHandler interface
-        Result<SummaryData, ErrorResult> handle(const domain::FinancePackageMessage &pkg) override
+        Result<void, ErrorResult> handle(const domain::FinancePackageMessage &pkg) override
         {
             // 1) 驗證 entry_type
             char et = pkg.ap_data.entry_type[0];
             if (et != 'A' && et != 'C')
-                return Result<SummaryData, ErrorResult>::Err(
+                return Result<void, ErrorResult>::Err(
                     ErrorResult{ErrorCode::InvalidPacket, "Invalid entry type"});
 
             // 2) Properly extract t_code with correct handling of null termination
@@ -50,7 +50,7 @@ namespace finance::infrastructure::network
             if (it == handlers_.end())
             {
                 LOG_F(WARNING, "找不到處理器 t_code='%s'", tcode.c_str());
-                return Result<SummaryData, ErrorResult>::Err(
+                return Result<void, ErrorResult>::Err(
                     ErrorResult{ErrorCode::UnknownTransactionCode, "Unknown t_code"});
             }
 

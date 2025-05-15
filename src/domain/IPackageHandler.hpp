@@ -11,7 +11,7 @@ namespace finance::domain
     public:
         virtual ~IPackageHandler() = default;
         // Only responsible for extracting ApData from the package and producing summary
-        virtual Result<SummaryData, ErrorResult> handle(const FinancePackageMessage &pkg) = 0;
+        virtual Result<void, ErrorResult> handle(const FinancePackageMessage &pkg) = 0;
     };
 
 } // namespace finance::domain

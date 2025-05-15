@@ -1,12 +1,12 @@
 #pragma once
 
-#include "../../domain/Result.hpp"
-#include "../../domain/FinanceDataStructure.hpp"
-#include "../../utils/FinanceUtils.hpp"
-#include "../config/ConnectionConfigProvider.hpp"
-#include "../config/AreaBranchProvider.hpp"
+#include "domain/Result.hpp"
+#include "domain/FinanceDataStructure.hpp"
+#include "utils/FinanceUtils.hpp"
+#include "infrastructure/config/ConnectionConfigProvider.hpp"
+#include "infrastructure/config/AreaBranchProvider.hpp"
 #include "RedisPlusPlusClient.hpp"
-#include "../../domain/IFinanceRepository.hpp"
+#include "domain/IFinanceRepository.hpp"
 #include <string>
 #include <unordered_map>
 #include <shared_mutex>
@@ -45,15 +45,10 @@ namespace finance::infrastructure::storage
                 return Result<void, ErrorResult>::Ok();
 
             auto client = std::make_unique<RedisPlusPlusClient<SummaryData, ErrorResult>>();
-            const auto uri = config::ConnectionConfigProvider::redisUri();
-            const auto poolSize = config::ConnectionConfigProvider::redisPoolSize();
-            const auto waitTimeoutMs = config::ConnectionConfigProvider::redisWaitTimeoutMs();
-
-            return client->setConnectOption(poolSize, waitTimeoutMs)
-                .and_then([&] { // ← 注意：這裡不帶參數
-                    return client->connect(uri);
-                })
-                .and_then([&] { // ← 這裡也不帶參數
+            std::string uri = config::ConnectionConfigProvider::redisUri();
+            std::string password = config::ConnectionConfigProvider::redisPassword();
+            return client->connect(uri, password)
+                .and_then([&] { // ← 這裡不帶參數
                     this->redisClient_ = std::move(client);
                     return Result<void, ErrorResult>::Ok();
                 })
@@ -67,17 +62,26 @@ namespace finance::infrastructure::storage
          * @param data 要同步的 SummaryData 資料
          * @return Result<void> 操作結果
          */
-        Result<void, ErrorResult> sync(const std::string &key, const SummaryData &d) override
+        Result<void, ErrorResult> sync(const std::string &key, const SummaryData *data) override
         {
             if (!redisClient_)
+            {
                 return Result<void, ErrorResult>::Err(
                     ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 未正確連線"});
+            }
 
-            return summaryDataToJson(d)
+            if (data == nullptr)
+            {
+                LOG_F(ERROR, "RedisSummaryAdapter:Unexpact Summary Data null, key=%s", key.c_str());
+                return Result<void, ErrorResult>::Err(
+                    ErrorResult{ErrorCode::UnexpectedError, "RedisSummaryAdapter:summary_data = nullptr"});
+            }
+
+            return summaryDataToJson(data)
                 .and_then([this, &key](const std::string &j)
                           { return redisClient_->setJson(key, "$", j); })
-                .and_then([this, &key, &d]
-                          { return setCacheData(key, d); })
+                // .and_then([this, &key, &d]
+                //           { return setData(key, d); })
                 .map_err([&](const ErrorResult &e)
                          { return ErrorResult{e.code, "Sync 失敗: " + e.message}; });
         }
@@ -87,29 +91,31 @@ namespace finance::infrastructure::storage
          * @param key 完整的 Redis Key，例如 "summary:AREA:STOCK"
          * @return Result<SummaryData> 查詢結果
          */
-        Result<SummaryData, ErrorResult> get(const std::string &key) override
+        Result<domain::SummaryData *, ErrorResult> getData(const std::string &key) override
         {
-            if (!redisClient_)
-                return Result<SummaryData, ErrorResult>::Err(
-                    ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 未正確連線"});
-
-            // 1) 本地快取命中
-            if (auto cached = getCachedData(key); cached)
+            // 嘗試查找 key 是否存在於 summaryCacheData_ 中
+            if (auto it = summaryCacheData_.find(key); it != summaryCacheData_.end())
             {
-                return Result<SummaryData, ErrorResult>::Ok(*cached);
+                // 如果找到該 key，返回成功結果，並返回 SummaryData 的引用
+                return Result<domain::SummaryData *, ErrorResult>::Ok(&(it->second));
             }
-
-            // 2) 快取未命中，從 Redis 讀取
-            return redisClient_->getJson(key, "$")
-                .and_then([this, key](const std::string &jsonStr)
-                          { return jsonToSummaryData(jsonStr); })
-                .and_then([this, key](const SummaryData &d)
-                          {
-                        // 先更新快取，再直接回傳 d
-                        setCacheData(key, d);
-                        return Result<SummaryData, ErrorResult>::Ok(std::move(d)); })
-                .map_err([key](const ErrorResult &e)
-                         { return ErrorResult{e.code, "Get 失敗 [" + key + "]: " + e.message}; });
+            else
+            {
+                domain::SummaryData data;
+                // 如果未找到，創建新的 SummaryData 並插入到 summaryCacheData_
+                auto [newIt, inserted] = summaryCacheData_.emplace(key, data);
+                if (inserted)
+                {
+                    // 插入成功，返回新建 SummaryData 的引用
+                    return Result<domain::SummaryData *, ErrorResult>::Ok(&(newIt->second));
+                }
+                else
+                {
+                    // 理論上不會進到這裡，但仍然提供錯誤結果以防異常情況
+                    return Result<domain::SummaryData *, ErrorResult>::Err(
+                        ErrorResult{ErrorCode::UnexpectedError, "無法插入新的 SummaryData"});
+                }
+            }
         }
 
         /**
@@ -135,9 +141,10 @@ namespace finance::infrastructure::storage
          * @param key 要設置的 key
          * @return Result<void> 操作結果
          */
-        Result<void, ErrorResult> set(const std::string &key, const SummaryData &data) override
+        Result<void, ErrorResult> setData(const std::string &key, const SummaryData &data) override
         {
-            return setCacheData(key, data);
+            summaryCacheData_[key] = std::move(data);
+            return Result<void, ErrorResult>::Ok();
         }
 
         /**
@@ -145,9 +152,39 @@ namespace finance::infrastructure::storage
          * @param key 要更新的 key
          * @return Result<void> 操作結果
          */
-        Result<void, ErrorResult> update(const std::string &key, const SummaryData &data) override
+        Result<void, ErrorResult> update(const std::string &stock_id) override
         {
-            throw std::runtime_error("RedisSummaryAdapter::update not implemented");
+            if (!redisClient_)
+            {
+                return Result<void, ErrorResult>::Err(ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 未正確連線"});
+            }
+
+            // Summary data 加總
+            struct SummaryData company_summary;
+            company_summary.stock_id = stock_id;
+            company_summary.area_center = "ALL";
+            company_summary.belong_branches = config::AreaBranchProvider::getAllBranches();
+
+            for (const std::string &officeId : config::AreaBranchProvider::getBackofficeIds())
+            {
+                const std::string key = "summary:" + officeId + ":" + stock_id;
+                if (auto it = summaryCacheData_.find(key); it != summaryCacheData_.end())
+                {
+                    const auto &area_summary_data = it->second;
+
+                    company_summary.margin_available_amount += area_summary_data.margin_available_amount;
+                    company_summary.margin_available_qty += area_summary_data.margin_available_qty;
+                    company_summary.short_available_amount += area_summary_data.short_available_amount;
+                    company_summary.short_available_qty += area_summary_data.short_available_qty;
+                    company_summary.after_margin_available_amount += area_summary_data.after_margin_available_amount;
+                    company_summary.after_margin_available_qty += area_summary_data.after_margin_available_qty;
+                    company_summary.after_short_available_amount += area_summary_data.after_short_available_amount;
+                    company_summary.after_short_available_qty += area_summary_data.after_short_available_qty;
+                }
+            }
+
+            auto all_key = "summary:ALL:" + stock_id;
+            return sync(all_key, &company_summary);
         }
 
         /**
@@ -168,81 +205,36 @@ namespace finance::infrastructure::storage
             return false;
         }
 
-        /**
-         * @brief 公司層級彙總: ALL summary
-         *        使用本地快取與 AreaBranchProvider 定義的 backOfficeIds
-         */
-        Result<void, ErrorResult> updateCompanySummary(const std::string &stock_id)
-        {
-            if (!redisClient_)
-                return Result<void, ErrorResult>::Err(
-                    ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 未正確連線"});
-
-            SummaryData company_summary;
-            company_summary.stock_id = stock_id;
-            company_summary.area_center = "ALL";
-
-            // 取得所有 backOfficeId
-            auto backofficeIds = config::AreaBranchProvider::getBackofficeIds();
-
-            {
-                for (const auto &officeId : backofficeIds)
-                {
-                    const std::string key = "summary:" + officeId + ":" + stock_id;
-                    if (auto it = summaryCacheData_.find(key); it != summaryCacheData_.end())
-                    {
-                        const auto &d = it->second;
-                        company_summary.margin_available_amount += d.margin_available_amount;
-                        company_summary.margin_available_qty += d.margin_available_qty;
-                        company_summary.short_available_amount += d.short_available_amount;
-                        company_summary.short_available_qty += d.short_available_qty;
-                        company_summary.after_margin_available_amount += d.after_margin_available_amount;
-                        company_summary.after_margin_available_qty += d.after_margin_available_qty;
-                        company_summary.after_short_available_amount += d.after_short_available_amount;
-                        company_summary.after_short_available_qty += d.after_short_available_qty;
-                    }
-                }
-            }
-
-            auto all_key = "summary:ALL:" + stock_id;
-            return sync(all_key, company_summary);
-        }
-
     private:
         std::unique_ptr<RedisPlusPlusClient<SummaryData, ErrorResult>> redisClient_; // Redis 客戶端
         std::unordered_map<std::string, SummaryData> summaryCacheData_;              // 本地緩存
 
         /**
-         * @brief 更新本地緩存，加上鎖
-         * @param key 要緩存的鍵值
-         * @param data 要緩存的資料
-         * @return Result<void, ErrorResult> 緩存更新結果
-         */
-        Result<void, ErrorResult> setCacheData(const std::string &key, SummaryData data)
-        {
-            summaryCacheData_[key] = std::move(data);
-            return Result<void, ErrorResult>::Ok();
-        }
-
-        /**
          * @brief 將 SummaryData 序列化為 JSON 字串。
          */
-        Result<std::string, ErrorResult> summaryDataToJson(const SummaryData &data)
+        Result<std::string, ErrorResult> summaryDataToJson(const SummaryData *data)
         {
             try
             {
+                if (data == nullptr)
+                {
+                    LOG_F(ERROR, "RedisSummaryAdapter:summaryDataToJson Unexpact Summary Data null");
+                    return Result<std::string, ErrorResult>::Err(
+                        ErrorResult{ErrorCode::UnexpectedError, "RedisSummaryAdapter:summaryDataToJson summary_data = nullptr"});
+                }
+
                 nlohmann::json j;
-                j["stock_id"] = data.stock_id;
-                j["area_center"] = data.area_center;
-                j["margin_available_amount"] = data.margin_available_amount;
-                j["margin_available_qty"] = data.margin_available_qty;
-                j["short_available_amount"] = data.short_available_amount;
-                j["short_available_qty"] = data.short_available_qty;
-                j["after_margin_available_amount"] = data.after_margin_available_amount;
-                j["after_margin_available_qty"] = data.after_margin_available_qty;
-                j["after_short_available_amount"] = data.after_short_available_amount;
-                j["after_short_available_qty"] = data.after_short_available_qty;
-                j["belong_branches"] = data.belong_branches;
+                j["stock_id"] = data->stock_id;
+                j["area_center"] = data->area_center;
+                j["margin_available_amount"] = data->margin_available_amount;
+                j["margin_available_qty"] = data->margin_available_qty;
+                j["short_available_amount"] = data->short_available_amount;
+                j["short_available_qty"] = data->short_available_qty;
+                j["after_margin_available_amount"] = data->after_margin_available_amount;
+                j["after_margin_available_qty"] = data->after_margin_available_qty;
+                j["after_short_available_amount"] = data->after_short_available_amount;
+                j["after_short_available_qty"] = data->after_short_available_qty;
+                j["belong_branches"] = data->belong_branches;
                 return Result<std::string, ErrorResult>::Ok(j.dump());
             }
             catch (const std::exception &ex)
@@ -263,7 +255,7 @@ namespace finance::infrastructure::storage
                 if (j.is_array() && !j.empty())
                     j = j[0];
 
-                SummaryData data;
+                struct SummaryData data;
                 data.stock_id = j.at("stock_id").get<std::string>();
                 data.area_center = j.at("area_center").get<std::string>();
                 data.margin_available_amount = j.at("margin_available_amount").get<int64_t>();
@@ -275,7 +267,7 @@ namespace finance::infrastructure::storage
                 data.after_short_available_amount = j.at("after_short_available_amount").get<int64_t>();
                 data.after_short_available_qty = j.at("after_short_available_qty").get<int64_t>();
                 data.belong_branches = j.at("belong_branches").get<std::vector<std::string>>();
-                return Result<SummaryData, ErrorResult>::Ok(data);
+                return Result<SummaryData, ErrorResult>::Ok(std::move(data));
             }
             catch (const std::exception &ex)
             {
@@ -283,13 +275,6 @@ namespace finance::infrastructure::storage
                     ErrorResult{ErrorCode::JsonParseError,
                                 "解析JSON失敗: " + std::string(ex.what())});
             }
-        }
-
-        std::optional<SummaryData> getCachedData(const std::string &key) const
-        {
-            if (auto it = summaryCacheData_.find(key); it != summaryCacheData_.end())
-                return it->second;
-            return std::nullopt;
         }
 
         /**
@@ -323,6 +308,7 @@ namespace finance::infrastructure::storage
                 loaded++;
             }
             LOG_F(INFO, "已從 Redis 載入 %zu 筆 summary 資料。", loaded);
+            LOG_F(INFO, "Summary Cache Data 資料 : %zu 筆 。", summaryCacheData_.size());
             return Result<void, ErrorResult>::Ok();
         }
     };

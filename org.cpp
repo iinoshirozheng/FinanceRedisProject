@@ -17,7 +17,7 @@
 #include <set>
 #include <Poco/Buffer.h>
 #include <Poco/DateTime.h>
-#include <Poco/Timezone.setMaxThreadsh>
+#include <Poco/Timezone.h>
 #include <fstream>
 #include <iterator>
 #define FMT_HEADER_ONLY 1
@@ -267,6 +267,10 @@ struct summary_data_t
     std::string stock_id;
     std::string area_center;
     std::vector<std::string> belong_branches;
+
+    // 新增資買賣互抵張數
+    int64_t margin_buy_offset_qty;
+    int16_t short_sell_offset_qty;
 };
 
 std::map<char, int> backoffice_int_map =
@@ -505,13 +509,18 @@ public:
             element_reference.stock_id = stock_id;
             element_reference.area_center = area_center;
             element_reference.margin_available_amount = margin_available_amount;
-            element_reference.margin_available_qty = margin_available_qty;
+            // 加上 資買互抵 temp 值
+            int64_t buy_offset = element_reference.margin_buy_offset_qty;
+            int64_t sell_offset = element_reference.short_sell_offset_qty;
+
+            element_reference.margin_available_qty = margin_available_qty + buy_offset;
+            element_reference.after_margin_available_qty = after_margin_available_qty + buy_offset;
+            element_reference.short_available_qty = short_available_qty + sell_offset;
+            element_reference.after_short_available_qty = after_short_available_qty + sell_offset;
+
             element_reference.short_available_amount = short_available_amount;
-            element_reference.short_available_qty = short_available_qty;
             element_reference.after_margin_available_amount = after_margin_available_amount;
-            element_reference.after_margin_available_qty = after_margin_available_qty;
             element_reference.after_short_available_amount = after_short_available_amount;
-            element_reference.after_short_available_qty = after_short_available_qty;
 
             FillBelongBranches(element_reference.belong_branches, area_center);
             dump_summary_data(element_reference);
@@ -551,8 +560,11 @@ public:
             element_reference.short_available_qty += short_sell_offset_qty;
             element_reference.after_margin_available_qty += margin_buy_offset_qty;
             element_reference.after_short_available_qty += short_sell_offset_qty;
-            dump_summary_data(element_reference);
-            sync_to_redis(key, element_reference);
+            // 暫存 資買互抵
+            element_reference.margin_buy_offset_qty = margin_buy_offset_qty;
+            element_reference.short_sell_offset_qty = short_sell_offset_qty;
+            dump_summary_data(element_reference);  // LOG
+            sync_to_redis(key, element_reference); // only redis set
         }
     }
     void set_redis_url(const std::string &url, bool init_idx = false)

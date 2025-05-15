@@ -36,17 +36,15 @@ namespace finance::infrastructure::config
                                    if (!jsonData_.contains("redis_url") ||
                                        !jsonData_.contains("server_port") ||
                                        !jsonData_.contains("socket_timeout_ms") ||
-                                       !jsonData_.contains("redis_pool_size") ||
-                                       !jsonData_.contains("redis_wait_timeout_ms"))
+                                       !jsonData_.contains("redis_password"))
                                    {
                                        throw std::runtime_error("Missing required config fields");
                                    }
                                    // 依欄位類型取值，若型別錯誤則拋例外
-                                   redisUrl_ = jsonData_.at("redis_url").get<std::string>();               // Redis 連線 URL
-                                   serverPort_ = jsonData_.at("server_port").get<int>();                   // 服務埠號
-                                   socketTimeoutMs_ = jsonData_.at("socket_timeout_ms").get<int>();        // Socket 超時 (ms)
-                                   redisPoolSize_ = jsonData_.at("redis_pool_size").get<int>();            // Redis 連線池大小
-                                   redisWaitTimeoutMs_ = jsonData_.at("redis_wait_timeout_ms").get<int>(); // Redis 等待超時 (ms)
+                                   redisUrl_ = jsonData_.at("redis_url").get<std::string>();           // Redis 連線 URL
+                                   redisPassword_ = jsonData_.at("redis_password").get<std::string>(); // Redis 密碼，可選
+                                   serverPort_ = jsonData_.at("server_port").get<int>();               // 服務埠號
+                                   socketTimeoutMs_ = jsonData_.at("socket_timeout_ms").get<int>();    // Socket 超時 (ms)
                                });
                 return true; // 初次或重覆呼叫後皆回傳成功
             }
@@ -64,6 +62,12 @@ namespace finance::infrastructure::config
             return redisUrl_; // e.g. "127.0.0.1:6379"
         }
 
+        // 純讀：取得 Redis 密碼
+        inline static const std::string &redisPassword()
+        {
+            return redisPassword_; // e.g. "your_password"
+        }
+
         // 純讀：取得服務埠號
         inline static int serverPort()
         {
@@ -76,18 +80,6 @@ namespace finance::infrastructure::config
             return socketTimeoutMs_; // e.g. 5000
         }
 
-        // 純讀：取得 Redis 連線池大小
-        inline static int redisPoolSize()
-        {
-            return redisPoolSize_; // e.g. 10
-        }
-
-        // 純讀：取得 Redis 等待超時時間 (ms)
-        inline static int redisWaitTimeoutMs()
-        {
-            return redisWaitTimeoutMs_; // e.g. 100
-        }
-
     private:
         // 確保 JSON 只解析一次
         inline static std::once_flag initFlag_{};
@@ -95,10 +87,9 @@ namespace finance::infrastructure::config
         inline static nlohmann::json jsonData_{};
         // 配置參數
         inline static std::string redisUrl_ = {};
+        inline static std::string redisPassword_ = {}; // Redis 密碼
         inline static int serverPort_ = 0;
         inline static int socketTimeoutMs_ = 0;
-        inline static int redisPoolSize_ = 10;       // 預設值
-        inline static int redisWaitTimeoutMs_ = 100; // 預設值
     };
 
 } // namespace finance::infrastructure::config

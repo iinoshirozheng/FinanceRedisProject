@@ -305,6 +305,17 @@ namespace finance::infrastructure::network
             return std::nullopt;
         }
 
+        // 提供公有方法來讀取 head_ 和 tail_ 的值（僅讀取）
+        size_t getHead(std::memory_order order = std::memory_order_relaxed) const noexcept
+        {
+            return head_.load(order);
+        }
+
+        size_t getTail(std::memory_order order = std::memory_order_relaxed) const noexcept
+        {
+            return tail_.load(order);
+        }
+
     private:
         static constexpr size_t Mask = CAP - 1;
         static constexpr size_t CACHELINE_SIZE = 64;
