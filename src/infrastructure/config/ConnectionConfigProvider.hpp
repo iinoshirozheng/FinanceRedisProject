@@ -57,25 +57,25 @@ namespace finance::infrastructure::config
         }
 
         // 純讀：取得 Redis URL，確保已透過 loadFromFile() 初始化
-        inline static const std::string &redisUri()
+        inline static const std::string &redisUri() noexcept
         {
             return redisUrl_; // e.g. "127.0.0.1:6379"
         }
 
         // 純讀：取得 Redis 密碼
-        inline static const std::string &redisPassword()
+        inline static const std::string &redisPassword() noexcept
         {
             return redisPassword_; // e.g. "your_password"
         }
 
         // 純讀：取得服務埠號
-        inline static int serverPort()
+        inline static int serverPort() noexcept
         {
             return serverPort_; // e.g. 9516
         }
 
         // 純讀：取得 socket 超時時間 (ms)
-        inline static int socketTimeoutMs()
+        inline static int socketTimeoutMs() noexcept
         {
             return socketTimeoutMs_; // e.g. 5000
         }

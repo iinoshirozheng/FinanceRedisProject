@@ -58,7 +58,7 @@ namespace finance::infrastructure::config
             }
         }
 
-        inline static const std::vector<std::string> &getBranchesForArea(const std::string &areaId)
+        inline static const std::vector<std::string> &getBranchesForArea(const std::string &areaId) noexcept
         {
             auto it = areaToBranches_.find(areaId);
             if (it != areaToBranches_.end())
@@ -70,16 +70,16 @@ namespace finance::infrastructure::config
         }
 
         // 新增：返回所有分支 ID 的 vector
-        inline static const std::vector<std::string> &getAllBranches() { return allBranchesVec_; }
+        inline static const std::vector<std::string> &getAllBranches() noexcept { return allBranchesVec_; }
 
         // 返回所有分支 ID (改為檢查是否存在)
-        inline static bool IsBranchValid(const std::string &branchId) { return allBranchesSet_.count(branchId) > 0; }
+        inline static bool IsBranchValid(const std::string &branchId) noexcept { return allBranchesSet_.count(branchId) > 0; }
 
-        inline static const std::vector<std::string> &getBackofficeIds() { return backofficeIdsVec_; }
+        inline static const std::vector<std::string> &getBackofficeIds() noexcept { return backofficeIdsVec_; }
         // 返回所有分支對應列表 (改為檢查是否存在)
-        inline static bool IsFollowingBrokerId(const std::string &brokerId) { return followingBrokerIdsSet_.count(brokerId) > 0; }
+        inline static bool IsFollowingBrokerId(const std::string &brokerId) noexcept { return followingBrokerIdsSet_.count(brokerId) > 0; }
 
-        inline static bool IsValidAreaCenter(const std::string &area) { return backofficeIdsSet_.count(area) > 0; }
+        inline static bool IsValidAreaCenter(const std::string &area) noexcept { return backofficeIdsSet_.count(area) > 0; }
 
     private:
         inline static std::once_flag initFlag_{};

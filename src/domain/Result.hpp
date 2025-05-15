@@ -40,8 +40,8 @@ namespace finance::domain
         ErrorCode code;      // 錯誤碼
         std::string message; // 錯誤描述
 
-        // 移除 constexpr 關鍵字，因為 std::string 不是字面量類型
-        ErrorResult(ErrorCode c, std::string msg) noexcept
+        // Remove noexcept since std::string move constructor may throw
+        ErrorResult(ErrorCode c, std::string msg)
             : code(c), message(std::move(msg)) {}
     };
 
@@ -98,13 +98,13 @@ namespace finance::domain
          * @brief 判斷當前結果是否成功
          * @return 如果成功返回 true，否則返回 false
          */
-        constexpr bool is_ok() const { return is_ok_; }
+        constexpr bool is_ok() const noexcept { return is_ok_; }
 
         /**
          * @brief 判斷當前結果是否失敗
          * @return 如果失敗返回 true，否則返回 false
          */
-        constexpr bool is_err() const { return !is_ok_; }
+        constexpr bool is_err() const noexcept { return !is_ok_; }
 
         /**
          * @brief 獲取成功的值（若為錯誤狀態，則拋出異常）
@@ -113,7 +113,7 @@ namespace finance::domain
         T &unwrap()
         {
             if (!is_ok_)
-                throw std::logic_error("unwrap() called on Err"); // 若為錯誤狀態，報錯提示
+                throw std::logic_error("unwrap() called on Err");
             return std::get<T>(value_);
         }
 
@@ -121,7 +121,7 @@ namespace finance::domain
          * @brief 獲取成功的值（常量版本）
          * @return 成功類型的值
          */
-        constexpr const T &unwrap() const
+        const T &unwrap() const
         {
             if (!is_ok_)
                 throw std::logic_error("unwrap() called on Err");
@@ -143,7 +143,7 @@ namespace finance::domain
          * @brief 獲取錯誤的值（常量版本）
          * @return 錯誤類型的值
          */
-        constexpr const E &unwrap_err() const
+        const E &unwrap_err() const
         {
             if (is_ok_)
                 throw std::logic_error("unwrap_err() called on Ok");
@@ -155,7 +155,7 @@ namespace finance::domain
          * @param def 默認值
          * @return 要麼是成功值，要麼返回默認值
          */
-        constexpr T unwrap_or(T &&def) const
+        T unwrap_or(T &&def) const
         {
             return is_ok_ ? std::get<T>(value_) : std::forward<T>(def);
         }
@@ -262,7 +262,7 @@ namespace finance::domain
          * @brief 生成成功結果的靜態方法
          * @return 成功的 Result
          */
-        static constexpr Result Ok() { return Result(); }
+        static constexpr Result Ok() noexcept { return Result(); }
 
         /**
          * @brief 生成失敗結果的靜態方法
@@ -274,13 +274,13 @@ namespace finance::domain
          * @brief 判斷當前是否為成功結果
          * @return 如果成功返回 true
          */
-        constexpr bool is_ok() const { return !error_.has_value(); }
+        constexpr bool is_ok() const noexcept { return !error_.has_value(); }
 
         /**
          * @brief 判斷當前是否為失敗結果
          * @return 如果失敗返回 true
          */
-        constexpr bool is_err() const { return error_.has_value(); }
+        constexpr bool is_err() const noexcept { return error_.has_value(); }
 
         /**
          * @brief 獲取成功結果（若為錯誤狀態則拋出異常）
@@ -302,7 +302,7 @@ namespace finance::domain
             return *error_;
         }
 
-        constexpr const E &unwrap_err() const
+        const E &unwrap_err() const
         {
             if (!error_.has_value())
                 throw std::logic_error("unwrap_err() called on Ok");

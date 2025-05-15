@@ -9,7 +9,7 @@
 #include "domain/IFinanceRepository.hpp"
 #include <string>
 #include <unordered_map>
-#include <shared_mutex>
+#include <shared_mutex> // <--- 新增: 引入 shared_mutex
 #include <nlohmann/json.hpp>
 #include <loguru.hpp>
 #include <optional>
@@ -31,9 +31,9 @@ namespace finance::infrastructure::storage
         /**
          * @brief 構造函數但不立即連接 Redis，需要調用 init() 來初始化連線。
          */
-        RedisSummaryAdapter() = default;
+        RedisSummaryAdapter() noexcept = default;
 
-        ~RedisSummaryAdapter() = default;
+        ~RedisSummaryAdapter() noexcept = default;
 
         /**
          * @brief 初始化 Redis 連接。
@@ -41,6 +41,7 @@ namespace finance::infrastructure::storage
          */
         Result<void, ErrorResult> init() override
         {
+            // 此處不涉及 summaryCacheData_ 的並行存取，因為通常在單一執行緒中初始化
             if (redisClient_)
                 return Result<void, ErrorResult>::Ok();
 
@@ -48,10 +49,10 @@ namespace finance::infrastructure::storage
             std::string uri = config::ConnectionConfigProvider::redisUri();
             std::string password = config::ConnectionConfigProvider::redisPassword();
             return client->connect(uri, password)
-                .and_then([&] { // ← 這裡不帶參數
+                .and_then([&]
+                          {
                     this->redisClient_ = std::move(client);
-                    return Result<void, ErrorResult>::Ok();
-                })
+                    return Result<void, ErrorResult>::Ok(); })
                 .map_err([](const ErrorResult &e)
                          { return ErrorResult{e.code, "Redis 連線失敗: " + e.message}; });
         }
@@ -64,6 +65,13 @@ namespace finance::infrastructure::storage
          */
         Result<void, ErrorResult> sync(const std::string &key, const SummaryData *data) override
         {
+            // sync 方法的主要職責是將資料寫入 Redis。
+            // 它不直接修改 summaryCacheData_，但它讀取 data 指標指向的內容。
+            // 呼叫 sync 的地方 (如 Hcrtm01Handler, Hcrtm05pHandler) 應確保 data 指標的有效性和其內容的一致性。
+            // 如果 sync 之後還需要更新本地快取中對應 key 的 SummaryData (例如 data 指向的是一個臨時計算的結果，
+            // 並且希望這個結果也更新到快取)，則需要在 sync 之後額外呼叫 setData 並由 setData 負責鎖。
+            // 目前的 IFinanceRepository 介面中，sync 和 setData 是分開的。
+            // 此處我們假設 data 指向的內容在 sync 執行期間是穩定的。
             if (!redisClient_)
             {
                 return Result<void, ErrorResult>::Err(
@@ -77,11 +85,10 @@ namespace finance::infrastructure::storage
                     ErrorResult{ErrorCode::UnexpectedError, "RedisSummaryAdapter:summary_data = nullptr"});
             }
 
+            // data 的序列化不涉及對 summaryCacheData_ 的存取，所以此處不需要鎖 cacheMutex_
             return summaryDataToJson(data)
                 .and_then([this, &key](const std::string &j)
                           { return redisClient_->setJson(key, "$", j); })
-                // .and_then([this, &key, &d]
-                //           { return setData(key, d); })
                 .map_err([&](const ErrorResult &e)
                          { return ErrorResult{e.code, "Sync 失敗: " + e.message}; });
         }
@@ -89,31 +96,50 @@ namespace finance::infrastructure::storage
         /**
          * @brief 從本地緩存或 Redis 中讀取資料。
          * @param key 完整的 Redis Key，例如 "summary:AREA:STOCK"
-         * @return Result<SummaryData> 查詢結果
+         * @return Result<SummaryData*> 查詢結果 (返回指向快取中物件的指標)
          */
         Result<domain::SummaryData *, ErrorResult> getData(const std::string &key) override
         {
-            // 嘗試查找 key 是否存在於 summaryCacheData_ 中
-            if (auto it = summaryCacheData_.find(key); it != summaryCacheData_.end())
+            // 階段1: 嘗試以共享模式讀取
             {
-                // 如果找到該 key，返回成功結果，並返回 SummaryData 的引用
-                return Result<domain::SummaryData *, ErrorResult>::Ok(&(it->second));
-            }
-            else
+                std::shared_lock<std::shared_mutex> lock(cacheMutex_); // <--- 讀取鎖 (共享鎖)
+                auto it = summaryCacheData_.find(key);
+                if (it != summaryCacheData_.end())
+                {
+                    // 返回指向快取中元素的指標。呼叫者需注意指標的生命週期和執行緒安全。
+                    // 在鎖釋放後，如果其他執行緒刪除了這個元素，指標會失效。
+                    // 但由於我們返回的是指標，通常呼叫者會立即使用它，或者在同一個同步塊中使用。
+                    return Result<domain::SummaryData *, ErrorResult>::Ok(&(it->second));
+                }
+            } // <--- 讀取鎖釋放
+
+            // 階段2: 如果未找到，則以獨佔模式嘗試插入並返回
+            // 注意：這裡有一個小的競爭窗口：在釋放讀鎖和獲取寫鎖之間，可能有其他執行緒插入了該 key。
+            // 所以在獲取寫鎖後需要再次檢查。
             {
-                domain::SummaryData data;
-                // 如果未找到，創建新的 SummaryData 並插入到 summaryCacheData_
-                auto [newIt, inserted] = summaryCacheData_.emplace(key, data);
+                std::unique_lock<std::shared_mutex> lock(cacheMutex_); // <--- 寫入鎖 (獨佔鎖)
+                auto it = summaryCacheData_.find(key);                 // 再次檢查
+                if (it != summaryCacheData_.end())
+                {
+                    return Result<domain::SummaryData *, ErrorResult>::Ok(&(it->second)); // 其他執行緒已插入
+                }
+
+                // 如果確實不存在，創建新的 SummaryData 並插入
+                // 使用 emplace 會在 map 中直接構造 SummaryData
+                auto [newIt, inserted] = summaryCacheData_.emplace(key, SummaryData{}); // 預設構造 SummaryData
                 if (inserted)
                 {
-                    // 插入成功，返回新建 SummaryData 的引用
+                    // LOG_F(INFO, "Key '%s' not found in cache, created new entry.", key.c_str());
                     return Result<domain::SummaryData *, ErrorResult>::Ok(&(newIt->second));
                 }
                 else
                 {
-                    // 理論上不會進到這裡，但仍然提供錯誤結果以防異常情況
+                    // 理論上不會進到這裡，因為我們已經檢查過 key 是否存在。
+                    // 但如果 emplace 由於某些原因失敗 (例如記憶體不足拋出異常，但此處返回的是布林值)，
+                    // 這是一個未預期的錯誤。
+                    LOG_F(ERROR, "Failed to emplace new SummaryData for key '%s', though it was not found initially.", key.c_str());
                     return Result<domain::SummaryData *, ErrorResult>::Err(
-                        ErrorResult{ErrorCode::UnexpectedError, "無法插入新的 SummaryData"});
+                        ErrorResult{ErrorCode::UnexpectedError, "無法插入新的 SummaryData 到快取 (emplace 失敗)"});
                 }
             }
         }
@@ -129,27 +155,34 @@ namespace finance::infrastructure::storage
                     ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 未正確連線"});
 
             const auto pattern = "summary:*";
+            // Redis 的 keys 操作本身不直接影響 summaryCacheData_
             return redisClient_->keys(pattern)
                 .and_then([this](const std::vector<std::string> &keys)
-                          { return loadAndCacheKeysData(keys); })
+                          {
+                              // loadAndCacheKeysData 會修改 summaryCacheData_，所以需要在其外部或內部加獨佔鎖
+                              std::unique_lock<std::shared_mutex> lock(cacheMutex_); // <--- 寫入鎖 (獨佔鎖)
+                              return this->loadAndCacheKeysData(keys);               // 傳遞 this 指標
+                          })
                 .map_err([](const ErrorResult &e)
                          { return ErrorResult{e.code, "LoadAll 操作失敗: " + e.message}; });
         }
 
         /**
-         * @brief 實現 IFinanceRepository 接口的 set 方法
+         * @brief 實現 IFinanceRepository 接口的 set 方法 (通常用於更新或插入快取)
          * @param key 要設置的 key
+         * @param data 要寫入的 SummaryData 資料 (傳值，避免 data 的生命週期問題)
          * @return Result<void> 操作結果
          */
         Result<void, ErrorResult> setData(const std::string &key, const SummaryData &data) override
         {
-            summaryCacheData_[key] = std::move(data);
+            std::unique_lock<std::shared_mutex> lock(cacheMutex_); // <--- 寫入鎖 (獨佔鎖)
+            summaryCacheData_[key] = data;                         // 使用 operator[] 會覆蓋或插入
             return Result<void, ErrorResult>::Ok();
         }
 
         /**
-         * @brief 實現 IFinanceRepository 接口的 update 方法
-         * @param key 要更新的 key
+         * @brief 實現 IFinanceRepository 接口的 update 方法 (計算總公司資料並同步到 Redis)
+         * @param stock_id 要更新的股票 ID
          * @return Result<void> 操作結果
          */
         Result<void, ErrorResult> update(const std::string &stock_id) override
@@ -159,32 +192,44 @@ namespace finance::infrastructure::storage
                 return Result<void, ErrorResult>::Err(ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 未正確連線"});
             }
 
-            // Summary data 加總
-            struct SummaryData company_summary;
+            SummaryData company_summary; // 在棧上創建，避免直接修改快取中的元素
             company_summary.stock_id = stock_id;
             company_summary.area_center = "ALL";
+            // 假設 AreaBranchProvider 的方法是執行緒安全的 (通常靜態配置提供者是)
             company_summary.belong_branches = config::AreaBranchProvider::getAllBranches();
 
-            for (const std::string &officeId : config::AreaBranchProvider::getBackofficeIds())
-            {
-                const std::string key = "summary:" + officeId + ":" + stock_id;
-                if (auto it = summaryCacheData_.find(key); it != summaryCacheData_.end())
+            {                                                          // 讀取快取資料以計算總和
+                std::shared_lock<std::shared_mutex> lock(cacheMutex_); // <--- 讀取鎖 (共享鎖)
+                for (const std::string &officeId : config::AreaBranchProvider::getBackofficeIds())
                 {
-                    const auto &area_summary_data = it->second;
-
-                    company_summary.margin_available_amount += area_summary_data.margin_available_amount;
-                    company_summary.margin_available_qty += area_summary_data.margin_available_qty;
-                    company_summary.short_available_amount += area_summary_data.short_available_amount;
-                    company_summary.short_available_qty += area_summary_data.short_available_qty;
-                    company_summary.after_margin_available_amount += area_summary_data.after_margin_available_amount;
-                    company_summary.after_margin_available_qty += area_summary_data.after_margin_available_qty;
-                    company_summary.after_short_available_amount += area_summary_data.after_short_available_amount;
-                    company_summary.after_short_available_qty += area_summary_data.after_short_available_qty;
+                    const std::string key = "summary:" + officeId + ":" + stock_id;
+                    auto it = summaryCacheData_.find(key);
+                    if (it != summaryCacheData_.end())
+                    {
+                        const auto &area_summary_data = it->second;
+                        company_summary.margin_available_amount += area_summary_data.margin_available_amount;
+                        company_summary.margin_available_qty += area_summary_data.margin_available_qty;
+                        company_summary.short_available_amount += area_summary_data.short_available_amount;
+                        company_summary.short_available_qty += area_summary_data.short_available_qty;
+                        company_summary.after_margin_available_amount += area_summary_data.after_margin_available_amount;
+                        company_summary.after_margin_available_qty += area_summary_data.after_margin_available_qty;
+                        company_summary.after_short_available_amount += area_summary_data.after_short_available_amount;
+                        company_summary.after_short_available_qty += area_summary_data.after_short_available_qty;
+                    }
                 }
-            }
+            } // <--- 讀取鎖釋放
 
+            // 將計算得到的 company_summary 同步到 Redis
+            // 這個 sync 操作本身不修改 summaryCacheData_ (基於 sync 的當前實現)
             auto all_key = "summary:ALL:" + stock_id;
-            return sync(all_key, &company_summary);
+            Result<void, ErrorResult> sync_res = sync(all_key, &company_summary);
+
+            // 如果需要將 company_summary 也更新到本地快取 (例如，如果 "summary:ALL:stock_id" 也被快取管理)
+            // 則需要額外呼叫 setData:
+            // if (sync_res.is_ok()) {
+            //     return setData(all_key, company_summary); // setData 內部有寫入鎖
+            // }
+            return sync_res; // 目前只返回 sync 的結果
         }
 
         /**
@@ -196,9 +241,12 @@ namespace finance::infrastructure::storage
         {
             if (!redisClient_)
                 return false;
+
+            // Redis 的 del 操作通常是原子的
             auto res = redisClient_->del(key);
             if (res.is_ok())
             {
+                std::unique_lock<std::shared_mutex> lock(cacheMutex_); // <--- 寫入鎖 (獨佔鎖)
                 summaryCacheData_.erase(key);
                 return true;
             }
@@ -208,11 +256,12 @@ namespace finance::infrastructure::storage
     private:
         std::unique_ptr<RedisPlusPlusClient<SummaryData, ErrorResult>> redisClient_; // Redis 客戶端
         std::unordered_map<std::string, SummaryData> summaryCacheData_;              // 本地緩存
+        mutable std::shared_mutex cacheMutex_;                                       // <--- 新增: 用於保護 summaryCacheData_ 的讀寫鎖, mutable 允許在 const 方法中鎖定 (如果有的話)
 
         /**
-         * @brief 將 SummaryData 序列化為 JSON 字串。
+         * @brief 將 SummaryData 序列化為 JSON 字串。 (此方法不存取 summaryCacheData_，是純函數)
          */
-        Result<std::string, ErrorResult> summaryDataToJson(const SummaryData *data)
+        Result<std::string, ErrorResult> summaryDataToJson(const SummaryData *data) const // 標記為 const
         {
             try
             {
@@ -245,17 +294,17 @@ namespace finance::infrastructure::storage
         }
 
         /**
-         * @brief 將 JSON 反序列化為 SummaryData。
+         * @brief 將 JSON 反序列化為 SummaryData。 (此方法不存取 summaryCacheData_，是純函數)
          */
-        Result<SummaryData, ErrorResult> jsonToSummaryData(const std::string &jsonStr)
+        Result<SummaryData, ErrorResult> jsonToSummaryData(const std::string &jsonStr) const // 標記為 const
         {
             try
             {
                 nlohmann::json j = nlohmann::json::parse(jsonStr);
-                if (j.is_array() && !j.empty())
+                if (j.is_array() && !j.empty()) // RedisJSON 的 JSON.GET $ 返回的是陣列
                     j = j[0];
 
-                struct SummaryData data;
+                SummaryData data; // 直接使用 SummaryData，不再是指標
                 data.stock_id = j.at("stock_id").get<std::string>();
                 data.area_center = j.at("area_center").get<std::string>();
                 data.margin_available_amount = j.at("margin_available_amount").get<int64_t>();
@@ -278,17 +327,19 @@ namespace finance::infrastructure::storage
         }
 
         /**
-         * @brief 加載並快取多個 key 的數據
+         * @brief 加載並快取多個 key 的數據 (此方法假設已被外部獨佔鎖保護)
          * @param keys 要加載的 key 列表
          * @return Result<void> 操作結果
          */
         Result<void, ErrorResult> loadAndCacheKeysData(const std::vector<std::string> &keys)
         {
-            summaryCacheData_.clear();
+            // **重要**: 此方法假設在呼叫它之前，呼叫者已經獲取了 cacheMutex_ 的獨佔鎖。
+            // 例如，在 loadAll() 中。
+            summaryCacheData_.clear(); // 寫操作
             size_t loaded = 0;
             for (const auto &key : keys)
             {
-                auto jsonRes = redisClient_->getJson(key, "$");
+                auto jsonRes = redisClient_->getJson(key, "$"); // 讀取 Redis
                 if (jsonRes.is_err())
                 {
                     LOG_F(WARNING, "JSON.GET '%s' 失敗: %s",
@@ -296,15 +347,15 @@ namespace finance::infrastructure::storage
                     continue;
                 }
 
-                auto parseRes = jsonToSummaryData(jsonRes.unwrap());
+                auto parseRes = jsonToSummaryData(jsonRes.unwrap()); // 解析 JSON
                 if (parseRes.is_err())
                 {
                     LOG_F(WARNING, "解析 '%s' JSON 失敗: %s",
                           key.c_str(), parseRes.unwrap_err().message.c_str());
                     continue;
                 }
-
-                summaryCacheData_[key] = parseRes.unwrap();
+                // 寫入快取
+                summaryCacheData_[key] = parseRes.unwrap(); // 寫操作
                 loaded++;
             }
             LOG_F(INFO, "已從 Redis 載入 %zu 筆 summary 資料。", loaded);

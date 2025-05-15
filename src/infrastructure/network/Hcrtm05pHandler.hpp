@@ -4,7 +4,6 @@
 #include "domain/FinanceDataStructure.hpp"
 #include "domain/Result.hpp"
 #include "domain/IFinanceRepository.hpp"
-#include "utils/LogHelper.hpp"
 #include "utils/FinanceUtils.hpp"
 #include "infrastructure/config/AreaBranchProvider.hpp"
 #include <memory>

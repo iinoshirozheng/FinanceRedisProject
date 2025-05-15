@@ -19,7 +19,7 @@ namespace finance::utils
     public:
         // 將後台格式的數字字符串轉換為整數
         // 例如：前導空格的數字，或帶有符號的數字
-        static inline int64_t backOfficeToInt(const char *value, const size_t &length)
+        static inline int64_t backOfficeToInt(const char *value, const size_t &length) noexcept
         {
             // Mapping special characters ('J' to 'R' -> 1 to 9, and '}' -> 0)
             static constexpr char OFFSET = 'I'; // The character offset for 'J' to map to 1
@@ -69,7 +69,7 @@ namespace finance::utils
         }
 
         // 提取指定長度的字符串，並移除尾部空格
-        static inline std::string_view trim_right_view(const std::string &str)
+        static inline std::string_view trim_right_view(const std::string &str) noexcept
         {
             auto end = str.find_last_not_of(" \t\n\r");
             if (end == std::string::npos)
@@ -79,7 +79,7 @@ namespace finance::utils
             return std::string_view(str.data(), end + 1);
         }
 
-        static inline std::string_view trim_right_view(const char *str)
+        static inline std::string_view trim_right_view(const char *str) noexcept
         {
             if (!str)
                 return std::string_view();
@@ -89,21 +89,6 @@ namespace finance::utils
                 --len;
             }
             return std::string_view(str, len);
-        }
-
-        // 從系統標頭確定消息類型
-        static inline domain::MessageTransactionType transactionMessageType(const std::string_view &tcode)
-        {
-            if (tcode == "ELD001")
-            {
-                return domain::MessageTransactionType::HCRTM01;
-            }
-            else if (tcode == "ELD002")
-            {
-                return domain::MessageTransactionType::HCRTM05P;
-            }
-
-            return domain::MessageTransactionType::OTHERS;
         }
     };
 } // namespace finance::utils

@@ -25,7 +25,7 @@ namespace finance::infrastructure::storage
     class RedisPlusPlusClient
     {
     public:
-        inline RedisPlusPlusClient()
+        inline RedisPlusPlusClient() noexcept
             : redis_(nullptr), poolSize_(10), waitTimeoutMs_(100) {}
 
         inline ~RedisPlusPlusClient() { disconnect(); }
@@ -70,7 +70,7 @@ namespace finance::infrastructure::storage
             return connect(host, port, password);
         }
 
-        inline Result<void, E> disconnect()
+        inline Result<void, E> disconnect() noexcept
         {
             redis_.reset();
             return Result<void, E>::Ok();
