@@ -1,10 +1,10 @@
 #pragma once
 
-#include "../domain/Result.hpp"
-#include "../domain/IFinanceRepository.hpp"
-#include "../domain/IPackageHandler.hpp"
-#include "../infrastructure/network/TcpServiceAdapter.hpp"
-#include "../infrastructure/config/ConnectionConfigProvider.hpp"
+#include "domain/Result.hpp"
+#include "domain/IFinanceRepository.hpp"
+#include "domain/IPackageHandler.hpp"
+#include "infrastructure/network/TcpServiceAdapter.hpp"
+#include "infrastructure/config/ConnectionConfigProvider.hpp"
 #include <memory>
 #include <atomic>
 #include <csignal>
