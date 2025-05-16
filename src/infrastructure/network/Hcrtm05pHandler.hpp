@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include "domain/IPackageHandler.hpp"
@@ -47,11 +48,10 @@ namespace finance::infrastructure::network
             }
 
             // Convert integers
-            int64_t margin_buy_offset_qty = FinanceUtils::backOfficeToInt(hcrtm05p.margin_buy_offset_qty, sizeof(hcrtm05p.margin_buy_offset_qty));
-            int64_t short_sell_offset_qty = FinanceUtils::backOfficeToInt(hcrtm05p.short_sell_offset_qty, sizeof(hcrtm05p.short_sell_offset_qty));
+            CONVERT_BACKOFFICE_INT64(hcrtm05p, margin_buy_offset_qty);
+            CONVERT_BACKOFFICE_INT64(hcrtm05p, short_sell_offset_qty);
 
             // Try to get existing data to merge any other fields we don't know about
-
             auto existing = repo_->getData(stock_id);
             if (existing.is_err())
             {

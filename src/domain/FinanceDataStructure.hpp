@@ -6,14 +6,6 @@
 
 namespace finance::domain
 {
-    // 金融消息類型
-    enum class MessageTransactionType
-    {
-        HCRTM01,
-        HCRTM05P,
-        OTHERS
-    };
-
     /*  @ Struct Name: SummaryData
     @ Description:
         * 代表融資融券交易的摘要數據

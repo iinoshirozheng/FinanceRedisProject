@@ -23,13 +23,14 @@ namespace finance::domain
         RedisReplyTypeError,         // Redis 返回類型錯誤
         RedisKeyNotFound,            // Redis 無法找到指定 Key
 
-        JsonParseError,         // JSON 解析錯誤
-        TcpStartFailed,         // TCP 服務啟動失敗
-        InvalidPacket,          // 無效封包
-        UnknownTransactionCode, // 未知的交易代碼
-        InternalError,          // 內部錯誤
-        UnexpectedError,        // 未知錯誤
-        GetDataNull             // Null ptr
+        JsonParseError,          // JSON 解析錯誤
+        TcpStartFailed,          // TCP 服務啟動失敗
+        InvalidPacket,           // 無效封包
+        UnknownTransactionCode,  // 未知的交易代碼
+        InternalError,           // 內部錯誤
+        UnexpectedError,         // 未知錯誤
+        BackOfficeIntParseError, // BackOffice 數字解析錯誤
+        GetDataNull              // Null ptr
     };
 
     /**

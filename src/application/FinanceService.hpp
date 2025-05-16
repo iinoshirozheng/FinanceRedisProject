@@ -127,4 +127,4 @@ namespace finance::application
         bool isRunning_{false};
         std::atomic<int> signalStatus_{0};
     };
-}
+} // namespace finance::application

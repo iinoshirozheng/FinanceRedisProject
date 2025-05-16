@@ -53,8 +53,111 @@ namespace finance::infrastructure::storage
                           {
                     this->redisClient_ = std::move(client);
                     return Result<void, ErrorResult>::Ok(); })
+                .and_then([this]
+                          {
+                    if(initRedisSearchIndex_)
+                        return ensureIndex();
+
+                    return Result<void, ErrorResult>::Ok(); })
                 .map_err([](const ErrorResult &e)
                          { return ErrorResult{e.code, "Redis 連線失敗: " + e.message}; });
+        }
+
+        /**
+         * @brief 確保 Redis 上 SummaryData 的 Redisearch 索引存在。
+         * @details 如果索引不存在則建立，如果已存在則先刪除後重建 (模擬原始碼行為)。
+         * @return Result<void, ErrorResult> 操作結果
+         */
+        Result<void, ErrorResult> setRedisSearchIndex(bool ensureIndex)
+        {
+            initRedisSearchIndex_ = ensureIndex;
+            return Result<void, ErrorResult>::Ok();
+        }
+
+        /**
+         * @brief 確保 Redis 上 SummaryData 的 Redisearch 索引存在。
+         * @details 如果索引不存在則建立，如果已存在則先刪除後重建 (模擬原始碼行為)。
+         * @return Result<void, ErrorResult> 操作結果
+         */
+        Result<void, ErrorResult> ensureIndex()
+        {
+            if (!redisClient_)
+            {
+                return Result<void, ErrorResult>::Err(
+                    ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 未正確連線，無法建立索引"});
+            }
+
+            const std::string index_name = "outputIdx";
+            const std::string key_prefix = "summary:"; // 與 sync 方法中的 key 前綴一致
+
+            // Use Result chain for better error handling than raw try-catch on command calls
+            auto create_res = redisClient_->command<void>(
+                "FT.CREATE",
+                index_name,
+                "ON", "JSON",              // 索引類型
+                "PREFIX", "1", key_prefix, // 索引前綴
+                "SCHEMA",                  // 定義索引欄位
+                "$.stock_id", "AS", "stock_id", "TEXT",
+                "$.area_center", "AS", "area_center", "TEXT",
+                "$.belong_branches.*", "AS", "branches", "TAG" // belong_branches 是陣列，用 .* 和 TAG 建立索引
+            );
+
+            if (create_res.is_ok())
+            {
+                LOG_F(INFO, "Redisearch 索引 '%s' 建立成功。", index_name.c_str());
+                return Result<void, ErrorResult>::Ok();
+            }
+
+            // If create failed, check if it's an "already exists" error
+            const auto &err = create_res.unwrap_err();
+            // Check for specific Redis error indicating index already exists
+            // Redisearch returns ReplyError for command errors. We need to check the error message.
+            // ErrorCode::RedisReplyTypeError is used by RedisPlusPlusClient for ReplyError.
+            if (err.code == ErrorCode::RedisReplyTypeError &&
+                err.message.find("Index already exists") != std::string::npos)
+            {
+                LOG_F(WARNING, "Redisearch 索引 '%s' 已存在，嘗試刪除後重建。", index_name.c_str());
+                // Index already exists, try dropping it
+                auto drop_res = redisClient_->command<void>("FT.DROP", index_name);
+                if (drop_res.is_err())
+                {
+                    // Drop failed, log error and return
+                    return Result<void, ErrorResult>::Err(
+                        ErrorResult{ErrorCode::RedisCommandFailed, // Use CommandFailed as DROP is a command
+                                    "刪除現有 Redisearch 索引 '" + index_name + "' 失敗: " + drop_res.unwrap_err().message});
+                }
+
+                // Drop successful, retry creating the index
+                auto recreate_res = redisClient_->command<void>(
+                    "FT.CREATE",
+                    index_name,
+                    "ON", "JSON",
+                    "PREFIX", "1", key_prefix,
+                    "SCHEMA",
+                    "$.stock_id", "AS", "stock_id", "TEXT",
+                    "$.area_center", "AS", "area_center", "TEXT",
+                    "$.belong_branches.*", "AS", "branches", "TAG");
+
+                if (recreate_res.is_ok())
+                {
+                    LOG_F(INFO, "Redisearch 索引 '%s' 刪除後重建成功。", index_name.c_str());
+                    return Result<void, ErrorResult>::Ok();
+                }
+                else
+                {
+                    // Recreate failed
+                    return Result<void, ErrorResult>::Err(
+                        ErrorResult{ErrorCode::RedisCommandFailed, // Use CommandFailed
+                                    "重建 Redisearch 索引 '" + index_name + "' 失敗: " + recreate_res.unwrap_err().message});
+                }
+            }
+            else
+            {
+                // Other index creation failed error
+                return Result<void, ErrorResult>::Err(
+                    ErrorResult{ErrorCode::RedisCommandFailed, // Use CommandFailed
+                                "建立 Redisearch 索引 '" + index_name + "' 失敗: " + err.message});
+            }
         }
 
         /**
@@ -257,6 +360,7 @@ namespace finance::infrastructure::storage
         std::unique_ptr<RedisPlusPlusClient<SummaryData, ErrorResult>> redisClient_; // Redis 客戶端
         std::unordered_map<std::string, SummaryData> summaryCacheData_;              // 本地緩存
         mutable std::shared_mutex cacheMutex_;                                       // <--- 新增: 用於保護 summaryCacheData_ 的讀寫鎖, mutable 允許在 const 方法中鎖定 (如果有的話)
+        bool initRedisSearchIndex_ = false;
 
         /**
          * @brief 將 SummaryData 序列化為 JSON 字串。 (此方法不存取 summaryCacheData_，是純函數)

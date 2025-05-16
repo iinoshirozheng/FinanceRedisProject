@@ -65,24 +65,24 @@ namespace finance::infrastructure::network
             struct domain::SummaryData *summary_data = get_result.unwrap();
 
             // Convert to integers
-            int64_t margin_amount = FinanceUtils::backOfficeToInt(hcrtm01.margin_amount, sizeof(hcrtm01.margin_amount));
-            int64_t margin_buy_order_amount = FinanceUtils::backOfficeToInt(hcrtm01.margin_buy_order_amount, sizeof(hcrtm01.margin_buy_order_amount));
-            int64_t margin_sell_match_amount = FinanceUtils::backOfficeToInt(hcrtm01.margin_sell_match_amount, sizeof(hcrtm01.margin_sell_match_amount));
-            int64_t margin_qty = FinanceUtils::backOfficeToInt(hcrtm01.margin_qty, sizeof(hcrtm01.margin_qty));
-            int64_t margin_buy_order_qty = FinanceUtils::backOfficeToInt(hcrtm01.margin_buy_order_qty, sizeof(hcrtm01.margin_buy_order_qty));
-            int64_t margin_sell_match_qty = FinanceUtils::backOfficeToInt(hcrtm01.margin_sell_match_qty, sizeof(hcrtm01.margin_sell_match_qty));
-            int64_t short_amount = FinanceUtils::backOfficeToInt(hcrtm01.short_amount, sizeof(hcrtm01.short_amount));
-            int64_t short_sell_order_amount = FinanceUtils::backOfficeToInt(hcrtm01.short_sell_order_amount, sizeof(hcrtm01.short_sell_order_amount));
-            int64_t short_qty = FinanceUtils::backOfficeToInt(hcrtm01.short_qty, sizeof(hcrtm01.short_qty));
-            int64_t short_sell_order_qty = FinanceUtils::backOfficeToInt(hcrtm01.short_sell_order_qty, sizeof(hcrtm01.short_sell_order_qty));
-            int64_t short_after_hour_sell_order_amount = FinanceUtils::backOfficeToInt(hcrtm01.short_after_hour_sell_order_amount, sizeof(hcrtm01.short_after_hour_sell_order_amount));
-            int64_t short_after_hour_sell_order_qty = FinanceUtils::backOfficeToInt(hcrtm01.short_after_hour_sell_order_qty, sizeof(hcrtm01.short_after_hour_sell_order_qty));
-            int64_t short_sell_match_amount = FinanceUtils::backOfficeToInt(hcrtm01.short_sell_match_amount, sizeof(hcrtm01.short_sell_match_amount));
-            int64_t short_sell_match_qty = FinanceUtils::backOfficeToInt(hcrtm01.short_sell_match_qty, sizeof(hcrtm01.short_sell_match_qty));
-            int64_t margin_after_hour_buy_order_amount = FinanceUtils::backOfficeToInt(hcrtm01.margin_after_hour_buy_order_amount, sizeof(hcrtm01.margin_after_hour_buy_order_amount));
-            int64_t margin_after_hour_buy_order_qty = FinanceUtils::backOfficeToInt(hcrtm01.margin_after_hour_buy_order_qty, sizeof(hcrtm01.margin_after_hour_buy_order_qty));
-            int64_t margin_buy_match_amount = FinanceUtils::backOfficeToInt(hcrtm01.margin_buy_match_amount, sizeof(hcrtm01.margin_buy_match_amount));
-            int64_t margin_buy_match_qty = FinanceUtils::backOfficeToInt(hcrtm01.margin_buy_match_qty, sizeof(hcrtm01.margin_buy_match_qty));
+            CONVERT_BACKOFFICE_INT64(hcrtm01, margin_amount);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, margin_buy_order_amount);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, margin_sell_match_amount);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, margin_qty);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, margin_buy_order_qty);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, margin_sell_match_qty);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, short_amount);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, short_sell_order_amount);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, short_qty);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, short_sell_order_qty);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, short_after_hour_sell_order_amount);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, short_after_hour_sell_order_qty);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, short_sell_match_amount);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, short_sell_match_qty);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, margin_after_hour_buy_order_amount);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, margin_after_hour_buy_order_qty);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, margin_buy_match_amount);
+            CONVERT_BACKOFFICE_INT64(hcrtm01, margin_buy_match_qty);
 
             // 處理後資料
             int64_t after_margin_available_amount = margin_amount - margin_buy_match_amount + margin_sell_match_amount - margin_after_hour_buy_order_amount;

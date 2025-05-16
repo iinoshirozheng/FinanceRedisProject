@@ -1,12 +1,17 @@
 #pragma once
 
-#include <string>
 #include <string_view>
 #include "domain/FinanceDataStructure.hpp"
-#include <cctype>
 #include <cstring>
-#include <nlohmann/json.hpp>
-#include <sstream>
+
+// 把後端資料(交易數字碼 交易量)轉成 -INT64，如果為1則為錯誤
+#define CONVERT_BACKOFFICE_INT64(STRUCT_NAME, VAR_NAME)                                                                                             \
+    int64_t VAR_NAME = FinanceUtils::backOfficeToInt(STRUCT_NAME.VAR_NAME, sizeof(STRUCT_NAME.VAR_NAME));                                           \
+    if (VAR_NAME == 1)                                                                                                                              \
+    {                                                                                                                                               \
+        return Result<void, ErrorResult>::Err(                                                                                                      \
+            ErrorResult{ErrorCode::BackOfficeIntParseError, "CONVERT_BACKOFFICE_INT64:backOfficeToInt parse error : " #STRUCT_NAME "." #VAR_NAME}); \
+    }
 
 namespace finance::utils
 {
@@ -17,68 +22,75 @@ namespace finance::utils
     class FinanceUtils
     {
     public:
-        // 將後台格式的數字字符串轉換為整數
-        // 例如：前導空格的數字，或帶有符號的數字
+        /**
+         * @brief 將後台格式的數字字符串轉換為整數。
+         * @details 根據後台協議，成功轉換的結果應為負數或零。最後一個字符表示個位數和潛在的負號信息。
+         * 忽略前導和尾部空格，但中間包含空格視為錯誤。遇到其他解析錯誤時，回傳 1。
+         * @param value 要轉換的字符串指針
+         * @param length 字符串長度
+         * @return int64_t 轉換結果，成功時為負數或零，失敗時為 1。
+         */
         static inline int64_t backOfficeToInt(const char *value, const size_t &length) noexcept
         {
-            // Mapping special characters ('J' to 'R' -> 1 to 9, and '}' -> 0)
+            // Mapping special characters ('J' to 'R' -> 1 to 9, and '}' -> 0) for the last digit and sign
             static constexpr char OFFSET = 'I'; // The character offset for 'J' to map to 1
 
             if (value == nullptr || length == 0) // Check for null pointer or zero length
             {
-                return 0;
+                return 1; // 空輸入視為成功，結果為 0
             }
-            int64_t result = 0;
 
-            // Parse the numeric part from the string (excluding the last character)
+            int64_t result = 0;
+            bool found_digit = false; // 標記是否已經遇到數字字符
+
+            // 遍歷字串
             for (size_t i = 0; i < length; ++i)
             {
-                if ('0' <= value[i] && value[i] <= '9')
+                char current_char = value[i];
+
+                if ('0' <= current_char && current_char <= '9')
                 {
-                    // Calculate the number "digit by digit"
-                    result = result * 10 + (value[i] - '0');
+                    // 是數字字符
+                    result = result * 10 + (current_char - '0');
+                    found_digit = true; // 標記已找到數字
                 }
-                else if ('J' <= value[i] && value[i] <= 'R')
+                else if (std::isspace(static_cast<unsigned char>(current_char)))
                 {
-                    result = result * 10 + (value[i] - OFFSET);
-                    break;
+                    if (found_digit)
+                        return 1;
                 }
-                else if (value[i] == '}')
+                else if ('J' <= current_char && current_char <= 'R')
                 {
-                    result = result * 10;
-                    break;
+                    return -1 * (result * 10 + (current_char - OFFSET));
+                }
+                else if (current_char == '}')
+                {
+                    return -result * 10;
+                }
+                else
+                {
+                    return 1;
                 }
             }
 
-            return -result; // Return the computed negative value.
+            return 1;
         }
 
-        // 提取指定長度的字符串，並移除尾部空格
-        static inline std::string trim_right(const char *str, size_t length)
-        {
-            if (str == nullptr)
-            {
-                return "";
-            }
-
-            while (length > 0 && std::isspace(static_cast<unsigned char>(str[length - 1])))
-            {
-                --length; // 向左推進，直到找到非空白字符
-            }
-            return std::string(str, length);
-        }
-
-        // 提取指定長度的字符串，並移除尾部空格
+        // 提取指定長度的字符串，並移除尾部空格 (std::string 版本)
+        // 修正測試失敗的問題，改用迴圈檢查尾部空格，邏輯與 const char* 版本一致
         static inline std::string_view trim_right_view(const std::string &str) noexcept
         {
-            auto end = str.find_last_not_of(" \t\n\r");
-            if (end == std::string::npos)
+            size_t len = str.length();
+            // 從字串尾部向前檢查，直到找到第一個非空白字符或到達字串開頭
+            while (len > 0 && std::isspace(static_cast<unsigned char>(str[len - 1])))
             {
-                return std::string_view(str.data(), 0);
+                --len; // 如果是空白字符，縮短有效長度
             }
-            return std::string_view(str.data(), end + 1);
+            // 返回一個 string_view，指向原始字串的數據，長度為找到的第一個非空白字符之前的部分
+            return std::string_view(str.data(), len);
         }
 
+        // 提取指定長度的字符串，並移除尾部空格 (const char* 版本)
         static inline std::string_view trim_right_view(const char *str) noexcept
         {
             if (!str)
@@ -89,6 +101,21 @@ namespace finance::utils
                 --len;
             }
             return std::string_view(str, len);
+        }
+
+        // trim_right 函式，返回 std::string，這裡不修改
+        static inline std::string trim_right(const char *str, size_t length)
+        {
+            if (str == nullptr)
+            {
+                return "";
+            }
+
+            while (length > 0 && std::isspace(static_cast<unsigned char>(str[length - 1])))
+            {
+                --length;
+            }
+            return std::string(str, length);
         }
     };
 } // namespace finance::utils
