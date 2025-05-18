@@ -12,141 +12,246 @@ using namespace finance::utils;
 // Tests for FinanceUtils::backOfficeToInt
 // ============================================================================
 
-TEST(FinanceUtilsTest, BackOfficeToInt_BasicNegative)
+TEST(BackOfficeToIntTest, NullOrEmptyInputs)
 {
-    // Negative integers ('J' to 'R' for 1-9, '}' for 0)
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("123J", 4), -1231);              // 123*10 + 1 -> -1231
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("45K", 3), -452);                // 45*10 + 2 -> -452
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("6R", 2), -69);                  // 6*10 + 9 -> -69
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("78}", 3), -780);                // 78*10 + 0 -> -780
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("0}", 2), 0);                    // 0*10 + 0 -> 0 (negative zero is still zero)
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("J", 1), -1);                    // Assuming implicit 0 before symbol: 0*10 + 1 -> -1
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("}", 1), 0);                     // Assuming implicit 0 before symbol: 0*10 + 0 -> 0
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("9R", 2), -99);                  // 9*10 + 9 -> -99
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("1J", 2), -11);                  // 1*10 + 1 -> -11
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("123456789R", 10), -1234567899); // Larger negative number
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("123456789}", 10), -1234567890); // Larger negative number ending in '}'
+    const char *null_ptr = nullptr;
+    char empty_str[] = ""; // For non-null but length 0
+
+    auto res1 = FinanceUtils::backOfficeToInt(null_ptr, 0);
+    ASSERT_TRUE(res1.is_err());
+
+    auto res2 = FinanceUtils::backOfficeToInt(empty_str, 0);
+    ASSERT_TRUE(res2.is_err());
+
+    // 根據函式實現，value == nullptr 會優先判斷
+    auto res3 = FinanceUtils::backOfficeToInt(null_ptr, 5);
+    ASSERT_TRUE(res3.is_err());
+
+    char non_empty_str[] = "abc";
+    auto res4 = FinanceUtils::backOfficeToInt(non_empty_str, 0); // length is 0
+    ASSERT_TRUE(res4.is_err());
 }
 
-TEST(FinanceUtilsTest, BackOfficeToInt_Whitespace)
+TEST(BackOfficeToIntTest, AllSpacesInputReturnsOkZero)
 {
-    EXPECT_EQ(FinanceUtils::backOfficeToInt(" 123K", 5), -1232);             // Leading space
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("123 ", 4), 1);                  // Trailing space
-    EXPECT_EQ(FinanceUtils::backOfficeToInt(" 123 ", 5), 1);                 // Both leading and trailing
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("  456}  ", 8), -4560);          // Multiple spaces
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("\t\n\r 789 \t\n\r", 11), 1);    // Various whitespaces
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("\t\n\r 77R \t\n\r", 11), -779); // Various whitespaces
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("1 2 3", 5), 1);                 // Spaces in between digits (should be ignored by current logic)
-    EXPECT_EQ(FinanceUtils::backOfficeToInt(" 1 2 J ", 7), 1);               // Mixed spaces and symbol
-    EXPECT_EQ(FinanceUtils::backOfficeToInt(" J ", 3), -1);                  // Spaces around symbol
-    EXPECT_EQ(FinanceUtils::backOfficeToInt(" R ", 3), -9);                  // Spaces around symbol
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("   ", 3), 1);                   // Only spaces
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("", 3), 1);                      // Only spaces
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("\t\n\r ", 5), 1);               // Only various whitespaces
+    // 假設 while (length > 0 && std::isspace...) 修正已加入
+    // 修剪後 length 會變為 0，for 循環不執行，返回 Ok(0)
+    const char *s1 = "   ";
+    auto res1 = FinanceUtils::backOfficeToInt(s1, strlen(s1));
+    ASSERT_TRUE(res1.is_ok());
+    EXPECT_EQ(res1.unwrap(), 0LL);
+
+    const char *s2 = " ";
+    auto res2 = FinanceUtils::backOfficeToInt(s2, strlen(s2));
+    ASSERT_TRUE(res2.is_ok());
+    EXPECT_EQ(res2.unwrap(), 0LL);
 }
 
-TEST(FinanceUtilsTest, BackOfficeToInt_NullOrEmpty)
+TEST(BackOfficeToIntTest, ValidPositiveNumbers)
 {
-    EXPECT_EQ(FinanceUtils::backOfficeToInt(nullptr, 0), 1);
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("123", 0), 1);   // length is 0, value is ignored
-    EXPECT_EQ(FinanceUtils::backOfficeToInt(nullptr, 5), 1); // value is nullptr, length is ignored after check
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("", 0), 1);      // empty string, length 0
-    char zero_len_buf[] = "";
-    EXPECT_EQ(FinanceUtils::backOfficeToInt(zero_len_buf, 0), 1);
-    // Testing with a buffer shorter than specified length (UB prone, but testing expected behavior if it doesn't crash)
-    char short_buf[] = "1K";                                     // Actual size 3 including null terminator
-    EXPECT_EQ(FinanceUtils::backOfficeToInt(short_buf, 2), -12); // Should process "12"
-    // EXPECT_EQ(FinanceUtils::backOfficeToInt(short_buf, 5), 12); // UB, might read garbage or crash
+    const char *s1 = "123";
+    auto res1 = FinanceUtils::backOfficeToInt(s1, strlen(s1));
+    ASSERT_TRUE(res1.is_ok());
+    EXPECT_EQ(res1.unwrap(), 123LL);
+
+    const char *s2 = "0";
+    auto res2 = FinanceUtils::backOfficeToInt(s2, strlen(s2));
+    ASSERT_TRUE(res2.is_ok());
+    EXPECT_EQ(res2.unwrap(), 0LL);
+
+    const char *s3 = "9876543210";
+    auto res3 = FinanceUtils::backOfficeToInt(s3, strlen(s3));
+    ASSERT_TRUE(res3.is_ok());
+    EXPECT_EQ(res3.unwrap(), 9876543210LL);
 }
 
-TEST(FinanceUtilsTest, BackOfficeToInt_IntermediateUnexpectedCharacters)
+TEST(BackOfficeToIntTest, LeadingSpaces)
 {
-    // Intermediate unexpected characters - should return 0 based on current logic (result reset to 0)
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("12A34J", 6), 1); // 'A' in middle -> 0
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("56-78}", 6), 1); // '-' in middle -> 0
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("abc", 3), 1);    // All invalid -> 0
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("12+34R", 6), 1); // '+' in middle -> 0
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("1 2A3 ", 6), 1); // Space then invalid char -> 0
-    EXPECT_EQ(FinanceUtils::backOfficeToInt(" A123", 5), 1);  // Leading space then invalid char -> 0
+    const char *s1 = "  123";
+    auto res1 = FinanceUtils::backOfficeToInt(s1, strlen(s1));
+    ASSERT_TRUE(res1.is_ok());
+    EXPECT_EQ(res1.unwrap(), 123LL);
 
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("1J23", 4), -11);     // 'J' in middle -> 0
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("12}3", 4), -120);    // '}' in middle -> 0
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("12}a  d", 4), -120); // '}' in middle -> 0
+    const char *s2 = " J"; // 前導空格，後綴J
+    auto res2 = FinanceUtils::backOfficeToInt(s2, strlen(s2));
+    ASSERT_TRUE(res2.is_ok());
+    EXPECT_EQ(res2.unwrap(), -1LL); // 0*10 + ('J'-'I') = 1 => -1
+
+    const char *s3 = "   }";
+    auto res3 = FinanceUtils::backOfficeToInt(s3, strlen(s3));
+    ASSERT_TRUE(res3.is_ok());
+    EXPECT_EQ(res3.unwrap(), 0LL); // 0*10 => 0 => -0
+
+    const char *s4 = "  12K";
+    auto res4 = FinanceUtils::backOfficeToInt(s4, strlen(s4));
+    ASSERT_TRUE(res4.is_ok());
+    EXPECT_EQ(res4.unwrap(), -122LL); // 12*10 + ('K'-'I'=2) = 122 => -122
 }
 
-TEST(FinanceUtilsTest, BackOfficeToInt_LeadingUnexpectedCharacters)
+TEST(BackOfficeToIntTest, TrailingSpaces)
 {
-    // Unexpected character at the very beginning - should return 0 based on current logic
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("A123", 4), 1);  // 'A' at beginning -> 0
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("-123J", 5), 1); // '-' at beginning -> 0
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("+123J", 5), 1); // '+' at beginning -> 0
+    // 假設 while (length > 0 && std::isspace...) 修正已加入
+    const char *s1 = "123  ";
+    auto res1 = FinanceUtils::backOfficeToInt(s1, strlen(s1));
+    ASSERT_TRUE(res1.is_ok());
+    EXPECT_EQ(res1.unwrap(), 123LL);
+
+    const char *s2 = "J  ";
+    auto res2 = FinanceUtils::backOfficeToInt(s2, strlen(s2));
+    ASSERT_TRUE(res2.is_ok());
+    EXPECT_EQ(res2.unwrap(), -1LL);
+
+    const char *s3 = "}   ";
+    auto res3 = FinanceUtils::backOfficeToInt(s3, strlen(s3));
+    ASSERT_TRUE(res3.is_ok());
+    EXPECT_EQ(res3.unwrap(), 0LL);
+
+    const char *s4 = "12J  ";
+    auto res4 = FinanceUtils::backOfficeToInt(s4, strlen(s4));
+    ASSERT_TRUE(res4.is_ok());
+    EXPECT_EQ(res4.unwrap(), -121LL);
 }
 
-TEST(FinanceUtilsTest, BackOfficeToInt_TrailingUnexpectedCharacters)
+TEST(BackOfficeToIntTest, LeadingAndTrailingSpaces)
 {
-    // Unexpected character at the end (not 'J'-'R' or '}' or space) - should return parsed numeric part
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("123X", 4), 1);      // 'X' at end -> 123
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("45!", 3), 1);       // '!' at end -> 45
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("123J.", 5), -1231); // '.' after symbol -> parsing stops at '.' symbol is processed
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("78}a", 4), -780);   // 'a' after symbol -> parsing stops at 'a', symbol is processed
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("R.", 2), -9);       // 'R' then '.', stops at '.' -> -9
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("}. ", 3), 0);       // '}', then '.', then space -> 0
+    const char *s1 = "  123  ";
+    auto res1 = FinanceUtils::backOfficeToInt(s1, strlen(s1));
+    ASSERT_TRUE(res1.is_ok());
+    EXPECT_EQ(res1.unwrap(), 123LL);
+
+    const char *s2 = "  J  ";
+    auto res2 = FinanceUtils::backOfficeToInt(s2, strlen(s2));
+    ASSERT_TRUE(res2.is_ok());
+    EXPECT_EQ(res2.unwrap(), -1LL);
 }
 
-TEST(FinanceUtilsTest, BackOfficeToInt_MixedValidInvalid)
+TEST(BackOfficeToIntTest, SuffixHandling)
 {
-    // Mixed valid and invalid characters - check expected behavior based on where invalid char is
-    // Based on current logic: first unexpected non-space char stops parsing.
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("12Kx", 4), -122); // 'K' in middle -> 0
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("1A2J", 4), 1);    // 'A' in middle -> 0
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("12}3", 4), -120); // '}' in middle -> 0
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("1 2A3 ", 6), 1);  // Space is skipped, 'A' stops parsing -> 0
+    // 'J' (74) - 'I' (73) = 1
+    // 'K' (75) - 'I' (73) = 2
+    // 'L' (76) - 'I' (73) = 3
+    // 'M' (77) - 'I' (73) = 4
+    // 'N' (78) - 'I' (73) = 5
+    // 'O' (79) - 'I' (73) = 6
+    // 'P' (80) - 'I' (73) = 7
+    // 'Q' (81) - 'I' (73) = 8
+    // 'R' (82) - 'I' (73) = 9
+    // '}' -> 0
+
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("J", 1).unwrap(), -1LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("K", 1).unwrap(), -2LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("L", 1).unwrap(), -3LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("M", 1).unwrap(), -4LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("N", 1).unwrap(), -5LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("O", 1).unwrap(), -6LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("P", 1).unwrap(), -7LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("Q", 1).unwrap(), -8LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("R", 1).unwrap(), -9LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("}", 1).unwrap(), 0LL);
+
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("1J", 2).unwrap(), -11LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("12K", 3).unwrap(), -122LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("123L", 4).unwrap(), -1233LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("1234M", 5).unwrap(), -12344LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("1N", 2).unwrap(), -15LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("2O", 2).unwrap(), -26LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("3P", 2).unwrap(), -37LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("4Q", 2).unwrap(), -48LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("5R", 2).unwrap(), -59LL);
+    EXPECT_EQ(FinanceUtils::backOfficeToInt("6}", 2).unwrap(), -60LL);
 }
 
-TEST(FinanceUtilsTest, BackOfficeToInt_LengthParameterEffect)
+TEST(BackOfficeToIntTest, SuffixIgnoresFollowingCharacters)
 {
-    // Ensure the 'length' parameter correctly limits processing
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("12345", 3), 1);
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("123J5", 4), -1231);
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("123 ", 3), 1);
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("12R ", 3), -129);
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("12345", 5), 1);
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("123J", 4), -1231);
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("12", 5), 1);
+    // 函式的行為是遇到後綴立即返回
+    const char *s1 = "12J34"; // 忽略 "34"
+    auto res1 = FinanceUtils::backOfficeToInt(s1, strlen(s1));
+    ASSERT_TRUE(res1.is_ok());
+    EXPECT_EQ(res1.unwrap(), -121LL);
 
-    char buffer_with_more_data[] = "1234N67890";
-    EXPECT_EQ(FinanceUtils::backOfficeToInt(buffer_with_more_data, 5), -12345);
-    char buffer_with_symbol[] = "123Jabc";
-    EXPECT_EQ(FinanceUtils::backOfficeToInt(buffer_with_symbol, 3), 1);
-    EXPECT_EQ(FinanceUtils::backOfficeToInt(buffer_with_symbol, 4), -1231);
-    EXPECT_EQ(FinanceUtils::backOfficeToInt(buffer_with_symbol, 5), -1231);
+    const char *s2 = "5}67"; // 忽略 "67"
+    auto res2 = FinanceUtils::backOfficeToInt(s2, strlen(s2));
+    ASSERT_TRUE(res2.is_ok());
+    EXPECT_EQ(res2.unwrap(), -50LL);
+
+    const char *s3 = "R1"; // 忽略 "1"
+    auto res3 = FinanceUtils::backOfficeToInt(s3, strlen(s3));
+    ASSERT_TRUE(res3.is_ok());
+    EXPECT_EQ(res3.unwrap(), -9LL);
 }
 
-TEST(FinanceUtilsTest, BackOfficeToInt_LargeValues)
+TEST(BackOfficeToIntTest, SpaceInTheMiddleOfNumber)
 {
-    // Test with values near int64_t limits (though backend format limits might be smaller)
-    // Based on margin_amount[11] -> max 10 digits + symbol
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("9999999999R", 11), -99999999999); // 10 nines + R
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("9999999999}", 11), -99999999990); // 10 nines + }
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("99999999999", 11), 1);            // 11 nines (if allowed)
-    // Based on margin_qty[6] -> max 5 digits + symbol
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("99999R", 6), -999999); // 5 nines + R
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("99999}", 6), -999990); // 5 nines + }
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("99999", 5), 1);        // 5 nines
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("999999", 6), 1);       // 6 nines (if allowed)
+    const char *s1 = "12 3";
+    auto res1 = FinanceUtils::backOfficeToInt(s1, strlen(s1));
+    ASSERT_TRUE(res1.is_err());
+
+    const char *s2 = "1 2J"; // J 之前，數字之後
+    auto res2 = FinanceUtils::backOfficeToInt(s2, strlen(s2));
+    ASSERT_TRUE(res2.is_err());
+
+    const char *s3 = "  12 3"; // 前導空格後，數字中間
+    auto res3 = FinanceUtils::backOfficeToInt(s3, strlen(s3));
+    ASSERT_TRUE(res3.is_err());
 }
 
-TEST(FinanceUtilsTest, BackOfficeToInt_SymbolOnly)
+TEST(BackOfficeToIntTest, InvalidCharacter)
 {
-    // Test with just the symbol, should be 0 + value
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("J", 1), -1);
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("R", 1), -9);
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("}", 1), 0);
-    EXPECT_EQ(FinanceUtils::backOfficeToInt(" ", 1), 1);
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("j", 1), 1);
-    EXPECT_EQ(FinanceUtils::backOfficeToInt("a", 1), 1);
+    const char *s1 = "12A3"; // A is invalid
+    auto res1 = FinanceUtils::backOfficeToInt(s1, strlen(s1));
+    ASSERT_TRUE(res1.is_err());
+    EXPECT_EQ(res1.unwrap_err().message, "backOfficeToInt: invalid character");
+
+    const char *s2 = "A123"; // A is invalid
+    auto res2 = FinanceUtils::backOfficeToInt(s2, strlen(s2));
+    ASSERT_TRUE(res2.is_err());
+    EXPECT_EQ(res2.unwrap_err().message, "backOfficeToInt: invalid character");
+
+    const char *s3 = "123S"; // S is not a valid suffix
+    auto res3 = FinanceUtils::backOfficeToInt(s3, strlen(s3));
+    ASSERT_TRUE(res3.is_err());
+    EXPECT_EQ(res3.unwrap_err().message, "backOfficeToInt: invalid character");
+
+    const char *s4 = "12{"; // { is not }
+    auto res4 = FinanceUtils::backOfficeToInt(s4, strlen(s4));
+    ASSERT_TRUE(res4.is_err());
+    EXPECT_EQ(res4.unwrap_err().message, "backOfficeToInt: invalid character");
+
+    const char *s5 = "1-2J"; // - is invalid in numeric part by this logic
+    auto res5 = FinanceUtils::backOfficeToInt(s5, strlen(s5));
+    ASSERT_TRUE(res5.is_err());
+    EXPECT_EQ(res5.unwrap_err().message, "backOfficeToInt: invalid character");
 }
 
+TEST(BackOfficeToIntTest, NumbersNearLimitsNoOverflowAssumption)
+{
+    // 由於使用者保證不溢位，我們只測試一些較大的數字
+    // 這些數字本身不應該導致此函式（如果無溢位問題）失敗
+    const char *s1 = "922337203685477580"; // Max_LL / 10 approx
+    auto res1 = FinanceUtils::backOfficeToInt(s1, strlen(s1));
+    ASSERT_TRUE(res1.is_ok());
+    EXPECT_EQ(res1.unwrap(), 922337203685477580LL);
+
+    const char *s2 = "922337203685477580J"; // (val * 10 + 1)
+    auto res2 = FinanceUtils::backOfficeToInt(s2, strlen(s2));
+    ASSERT_TRUE(res2.is_ok());
+    EXPECT_EQ(res2.unwrap(), -9223372036854775801LL);
+
+    const char *s3 = "922337203685477580}"; // (val * 10)
+    auto res3 = FinanceUtils::backOfficeToInt(s3, strlen(s3));
+    ASSERT_TRUE(res3.is_ok());
+    EXPECT_EQ(res3.unwrap(), -9223372036854775800LL);
+
+    const char *s4 = "0J";
+    auto res4 = FinanceUtils::backOfficeToInt(s4, strlen(s4));
+    ASSERT_TRUE(res4.is_ok());
+    EXPECT_EQ(res4.unwrap(), -1LL);
+
+    const char *s5 = "0}";
+    auto res5 = FinanceUtils::backOfficeToInt(s5, strlen(s5));
+    ASSERT_TRUE(res5.is_ok());
+    EXPECT_EQ(res5.unwrap(), 0LL);
+}
 // ============================================================================
 // Tests for TrimRight
 // ============================================================================

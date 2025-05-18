@@ -3,15 +3,17 @@
 #include <string_view>
 #include "domain/FinanceDataStructure.hpp"
 #include <cstring>
+#include "domain/Result.hpp"
 
-// 把後端資料(交易數字碼 交易量)轉成 -INT64，如果為1則為錯誤
+// 把後端資料(交易數字碼 交易量)轉成 -INT64
 #define CONVERT_BACKOFFICE_INT64(STRUCT_NAME, VAR_NAME)                                                                                             \
-    int64_t VAR_NAME = FinanceUtils::backOfficeToInt(STRUCT_NAME.VAR_NAME, sizeof(STRUCT_NAME.VAR_NAME));                                           \
-    if (VAR_NAME == 1)                                                                                                                              \
+    auto RESULT_##VAR_NAME = FinanceUtils::backOfficeToInt(STRUCT_NAME.VAR_NAME, sizeof(STRUCT_NAME.VAR_NAME));                                     \
+    if (RESULT_##VAR_NAME.is_err())                                                                                                                 \
     {                                                                                                                                               \
         return Result<void, ErrorResult>::Err(                                                                                                      \
             ErrorResult{ErrorCode::BackOfficeIntParseError, "CONVERT_BACKOFFICE_INT64:backOfficeToInt parse error : " #STRUCT_NAME "." #VAR_NAME}); \
-    }
+    }                                                                                                                                               \
+    int64_t VAR_NAME = RESULT_##VAR_NAME.unwrap();
 
 namespace finance::utils
 {
@@ -30,18 +32,24 @@ namespace finance::utils
          * @param length 字符串長度
          * @return int64_t 轉換結果，成功時為負數或零，失敗時為 1。
          */
-        static inline int64_t backOfficeToInt(const char *value, const size_t &length) noexcept
+        static inline domain::Result<int64_t, domain::ErrorResult> backOfficeToInt(const char *value, size_t length) noexcept
         {
             // Mapping special characters ('J' to 'R' -> 1 to 9, and '}' -> 0) for the last digit and sign
             static constexpr char OFFSET = 'I'; // The character offset for 'J' to map to 1
 
             if (value == nullptr || length == 0) // Check for null pointer or zero length
             {
-                return 1; // 空輸入視為成功，結果為 0
+                return domain::Result<int64_t, domain::ErrorResult>::Err(
+                    domain::ErrorResult{domain::ErrorCode::BackOfficeIntParseError, "backOfficeToInt: empty input"}); // 空輸入視為成功，結果為 0
             }
 
             int64_t result = 0;
             bool found_digit = false; // 標記是否已經遇到數字字符
+
+            while (std::isspace(value[length - 1]))
+            {
+                --length;
+            }
 
             // 遍歷字串
             for (size_t i = 0; i < length; ++i)
@@ -54,26 +62,29 @@ namespace finance::utils
                     result = result * 10 + (current_char - '0');
                     found_digit = true; // 標記已找到數字
                 }
-                else if (std::isspace(static_cast<unsigned char>(current_char)))
-                {
-                    if (found_digit)
-                        return 1;
-                }
+
                 else if ('J' <= current_char && current_char <= 'R')
                 {
-                    return -1 * (result * 10 + (current_char - OFFSET));
+                    return domain::Result<int64_t, domain::ErrorResult>::Ok(-1 * (result * 10 + (current_char - OFFSET)));
                 }
                 else if (current_char == '}')
                 {
-                    return -result * 10;
+                    return domain::Result<int64_t, domain::ErrorResult>::Ok(-result * 10);
+                }
+                else if (std::isspace(static_cast<unsigned char>(current_char)))
+                {
+                    if (found_digit)
+                        return domain::Result<int64_t, domain::ErrorResult>::Err(
+                            domain::ErrorResult{domain::ErrorCode::BackOfficeIntParseError, "backOfficeToInt: space in the middle of the string"});
                 }
                 else
                 {
-                    return 1;
+                    return domain::Result<int64_t, domain::ErrorResult>::Err(
+                        domain::ErrorResult{domain::ErrorCode::BackOfficeIntParseError, "backOfficeToInt: invalid character"});
                 }
             }
 
-            return 1;
+            return domain::Result<int64_t, domain::ErrorResult>::Ok(result);
         }
 
         // 提取指定長度的字符串，並移除尾部空格 (std::string 版本)
