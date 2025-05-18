@@ -61,120 +61,171 @@ namespace finance::infrastructure::network
         }
 
     private:
+        // producer() 方法保持不變，它負責接收數據並放入 RingBuffer
         void producer()
         {
+            LOG_F(INFO, "Producer thread started.");
             try
             {
                 while (running_)
                 {
+                    Poco::Net::StreamSocket clientSocket;
+                    try
+                    {
+                        clientSocket = serverSocket_.acceptConnection();
+                        LOG_F(INFO, "Accepted new connection from %s", clientSocket.peerAddress().toString().c_str());
+                    }
+                    catch (const Poco::Exception &exc)
+                    {
+                        if (running_)
+                        {
+                            LOG_F(ERROR, "Producer: Accept connection error: %s", exc.displayText().c_str());
+                        }
+                        else
+                        {
+                            LOG_F(INFO, "Producer thread shutting down due to Poco exception during stop.");
+                        }
+                        continue;
+                    }
 
-                    Poco::Net::StreamSocket clientSocket = serverSocket_.acceptConnection();
                     if (!clientSocket.impl()->initialized())
                     {
-                        LOG_F(ERROR, "clientSocket initialized failed !");
+                        LOG_F(ERROR, "Producer: clientSocket initialized failed !");
                         continue;
                     }
                     // clientSocket.setReceiveTimeout( Poco::Timespan(config::ConnectionConfigProvider::socketTimeoutMs() * 1000));
 
                     while (running_)
                     {
-                        // 1) 先拿到可連續寫入的位置與長度
                         size_t maxLen;
                         char *writePtr = ringBuffer_.writablePtr(maxLen);
+
                         if (maxLen == 0)
                         {
-                            // 緩衝區滿，輕自旋或稍微 sleep
                             std::this_thread::yield();
                             continue;
                         }
 
-                        // 2) 直接從 socket 讀到這塊記憶體
-                        size_t n = clientSocket.receiveBytes(writePtr, maxLen);
+                        size_t n = 0;
+                        try
+                        {
+                            n = clientSocket.receiveBytes(writePtr, maxLen);
+                        }
+                        catch (const Poco::TimeoutException &)
+                        {
+                            // LOG_F(DEBUG, "Producer: Receive timeout from %s", clientSocket.peerAddress().toString().c_str());
+                            continue;
+                        }
+                        catch (const Poco::Exception &exc)
+                        {
+                            LOG_F(ERROR, "Producer: Receive error from %s: %s", clientSocket.peerAddress().toString().c_str(), exc.displayText().c_str());
+                            break;
+                        }
+
                         if (n > 0)
                         {
-                            // 3) 發佈寫入長度
-                            LOG_F(INFO, "Get Data : %zu", n);
                             ringBuffer_.enqueue(n);
-                            cv_.notify_one();
+                            LOG_F(INFO, "Producer: Enqueued %zu bytes.", n);
                         }
-                    }
+                        else if (n == 0)
+                        {
+                            LOG_F(INFO, "Producer: Client %s disconnected normally.", clientSocket.peerAddress().toString().c_str());
+                            break;
+                        }
+                    } // end while(running_) for single client
+
+                    clientSocket.close();
+                    LOG_F(INFO, "Producer: Client socket closed.");
+
+                } // end while(running_) for accepting connections
+            }
+            catch (const Poco::Exception &exc)
+            {
+                if (running_)
+                {
+                    LOG_F(ERROR, "Producer thread Poco exception: %s", exc.displayText().c_str());
+                }
+                else
+                {
+                    LOG_F(INFO, "Producer thread shutting down due to Poco exception during stop.");
                 }
             }
             catch (const std::exception &e)
             {
-                LOG_F(ERROR, "Thread exception: %s", e.what());
+                LOG_F(ERROR, "Producer thread standard exception: %s", e.what());
             }
             catch (...)
             {
-                LOG_F(ERROR, "Unknown exception in thread");
+                LOG_F(ERROR, "Unknown exception in producer thread");
             }
+            LOG_F(INFO, "Producer thread stopped.");
         }
 
+        // consumer() 方法現在同步處理封包和後續操作
         void consumer()
         {
-            try
-            {
-                std::vector<char> tmp;
-                tmp.reserve(sizeof(domain::FinancePackageMessage));
+            LOG_F(INFO, "Consumer thread started (Synchronous processing).");
+            std::vector<char> tmp;
+            tmp.reserve(sizeof(domain::FinancePackageMessage) + 100);
 
-                while (running_)
+            while (running_)
+            {
+                // 使用 RingBuffer 的原生等待機制，直到有資料可讀或執行緒停止
+                // RingBuffer::waitForData() 會自旋等待
+                ringBuffer_.waitForData();
+
+                if (!running_)
+                    break;
+
+                auto segOpt = ringBuffer_.getNextPacket();
+                if (!segOpt)
                 {
-                    std::unique_lock<std::mutex> lk(cvMutex_);
-                    cv_.wait(lk, [this]
-                             { return !ringBuffer_.empty() || !running_; });
-
-                    if (!running_)
-                        break;
-
-                    auto segOpt = ringBuffer_.getNextPacket();
-                    if (!segOpt)
-                    {
-                        continue;
-                    }
-                    auto seg = *segOpt;
-
-                    // 心跳過濾
-                    if (seg.totalLen() < 3)
-                    {
-                        ringBuffer_.dequeue(seg.totalLen());
-                        continue;
-                    }
-
-                    // 重組跨界封包
-                    const domain::FinancePackageMessage *pkg;
-                    if (seg.len2 == 0)
-                    {
-                        pkg = reinterpret_cast<const domain::FinancePackageMessage *>(seg.ptr1);
-                    }
-                    else
-                    {
-                        tmp.clear();
-                        tmp.insert(tmp.end(), seg.ptr1, seg.ptr1 + seg.len1);
-                        tmp.insert(tmp.end(), seg.ptr2, seg.ptr2 + seg.len2);
-                        pkg = reinterpret_cast<const domain::FinancePackageMessage *>(tmp.data());
-                    }
-
-                    // 解析並 sync
-                    auto res = handler_->handle(*pkg);
-                    if (res.is_err())
-                    {
-                        LOG_F(ERROR, "封包解析失敗: %s", res.unwrap_err().message.c_str());
-                    }
-
-                    int len = seg.totalLen();
-                    LOG_F(INFO, "dequeue totalLen = %d", len);
-
-                    ringBuffer_.dequeue(len);
+                    continue;
                 }
-            }
-            catch (const std::exception &e)
-            {
-                LOG_F(ERROR, "Thread exception: %s", e.what());
-            }
-            catch (...)
-            {
-                LOG_F(ERROR, "Unknown exception in thread");
-            }
+                auto seg = *segOpt;
+
+                // 心跳過濾
+                if (seg.totalLen() < sizeof(domain::FinancePackageMessage) - sizeof(domain::ApData) - 10)
+                {
+                    LOG_F(INFO, "Consumer: Dropping potential keep alive packet with size %zu", seg.totalLen());
+                    ringBuffer_.dequeue(seg.totalLen());
+                    continue;
+                }
+
+                // 重組跨界封包
+                const domain::FinancePackageMessage *pkg = nullptr;
+                if (seg.len2 == 0)
+                {
+                    pkg = reinterpret_cast<const domain::FinancePackageMessage *>(seg.ptr1);
+                }
+                else
+                {
+                    tmp.clear();
+                    tmp.resize(seg.totalLen());
+                    std::memcpy(tmp.data(), seg.ptr1, seg.len1);
+                    std::memcpy(tmp.data() + seg.len1, seg.ptr2, seg.len2);
+                    pkg = reinterpret_cast<const domain::FinancePackageMessage *>(tmp.data());
+                    // LOG_F(DEBUG, "Consumer: Reassembled packet size %zu from two segments.", seg.totalLen());
+                }
+
+                // *** 同步處理封包 ***
+                // handler_->handle 方法現在不接受 TaskQueue 參數
+                // handle 方法內部會直接呼叫 repo_->sync() 和 repo_->update()
+                auto res = handler_->handle(*pkg); // 這一步可能會阻塞
+
+                if (res.is_err())
+                {
+                    LOG_F(ERROR, "Consumer: Packet handling failed for packet size %zu: %s", seg.totalLen(), res.unwrap_err().message.c_str());
+                    // 錯誤處理
+                }
+
+                // 從 RingBuffer 中移除已處理的封包數據
+                size_t len = seg.totalLen();
+                // LOG_F(INFO, "Consumer: Dequeueing packet of size %zu", len);
+                ringBuffer_.dequeue(len);
+            } // end while(running_) for consumer loop
+
+            LOG_F(INFO, "Consumer thread stopped.");
         }
 
         Poco::Net::ServerSocket serverSocket_;
