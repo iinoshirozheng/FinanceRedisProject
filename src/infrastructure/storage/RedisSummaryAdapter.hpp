@@ -203,47 +203,29 @@ namespace finance::infrastructure::storage
          */
         Result<domain::SummaryData *, ErrorResult> getData(const std::string &key) override
         {
-            // 階段1: 嘗試以共享模式讀取
+            // std::unique_lock<std::shared_mutex> lock(cacheMutex_); // <--- 寫入鎖 (獨佔鎖)
+            auto it = summaryCacheData_.find(key); // 再次檢查
+            if (it != summaryCacheData_.end())
             {
-                std::shared_lock<std::shared_mutex> lock(cacheMutex_); // <--- 讀取鎖 (共享鎖)
-                auto it = summaryCacheData_.find(key);
-                if (it != summaryCacheData_.end())
-                {
-                    // 返回指向快取中元素的指標。呼叫者需注意指標的生命週期和執行緒安全。
-                    // 在鎖釋放後，如果其他執行緒刪除了這個元素，指標會失效。
-                    // 但由於我們返回的是指標，通常呼叫者會立即使用它，或者在同一個同步塊中使用。
-                    return Result<domain::SummaryData *, ErrorResult>::Ok(&(it->second));
-                }
-            } // <--- 讀取鎖釋放
+                return Result<domain::SummaryData *, ErrorResult>::Ok(&(it->second)); // 其他執行緒已插入
+            }
 
-            // 階段2: 如果未找到，則以獨佔模式嘗試插入並返回
-            // 注意：這裡有一個小的競爭窗口：在釋放讀鎖和獲取寫鎖之間，可能有其他執行緒插入了該 key。
-            // 所以在獲取寫鎖後需要再次檢查。
+            // 如果確實不存在，創建新的 SummaryData 並插入
+            // 使用 emplace 會在 map 中直接構造 SummaryData
+            auto [newIt, inserted] = summaryCacheData_.emplace(key, SummaryData{}); // 預設構造 SummaryData
+            if (inserted)
             {
-                std::unique_lock<std::shared_mutex> lock(cacheMutex_); // <--- 寫入鎖 (獨佔鎖)
-                auto it = summaryCacheData_.find(key);                 // 再次檢查
-                if (it != summaryCacheData_.end())
-                {
-                    return Result<domain::SummaryData *, ErrorResult>::Ok(&(it->second)); // 其他執行緒已插入
-                }
-
-                // 如果確實不存在，創建新的 SummaryData 並插入
-                // 使用 emplace 會在 map 中直接構造 SummaryData
-                auto [newIt, inserted] = summaryCacheData_.emplace(key, SummaryData{}); // 預設構造 SummaryData
-                if (inserted)
-                {
-                    // LOG_F(INFO, "Key '%s' not found in cache, created new entry.", key.c_str());
-                    return Result<domain::SummaryData *, ErrorResult>::Ok(&(newIt->second));
-                }
-                else
-                {
-                    // 理論上不會進到這裡，因為我們已經檢查過 key 是否存在。
-                    // 但如果 emplace 由於某些原因失敗 (例如記憶體不足拋出異常，但此處返回的是布林值)，
-                    // 這是一個未預期的錯誤。
-                    LOG_F(ERROR, "Failed to emplace new SummaryData for key '%s', though it was not found initially.", key.c_str());
-                    return Result<domain::SummaryData *, ErrorResult>::Err(
-                        ErrorResult{ErrorCode::UnexpectedError, "無法插入新的 SummaryData 到快取 (emplace 失敗)"});
-                }
+                // LOG_F(INFO, "Key '%s' not found in cache, created new entry.", key.c_str());
+                return Result<domain::SummaryData *, ErrorResult>::Ok(&(newIt->second));
+            }
+            else
+            {
+                // 理論上不會進到這裡，因為我們已經檢查過 key 是否存在。
+                // 但如果 emplace 由於某些原因失敗 (例如記憶體不足拋出異常，但此處返回的是布林值)，
+                // 這是一個未預期的錯誤。
+                LOG_F(ERROR, "Failed to emplace new SummaryData for key '%s', though it was not found initially.", key.c_str());
+                return Result<domain::SummaryData *, ErrorResult>::Err(
+                    ErrorResult{ErrorCode::UnexpectedError, "無法插入新的 SummaryData 到快取 (emplace 失敗)"});
             }
         }
 
@@ -263,8 +245,7 @@ namespace finance::infrastructure::storage
                 .and_then([this](const std::vector<std::string> &keys)
                           {
                               // loadAndCacheKeysData 會修改 summaryCacheData_，所以需要在其外部或內部加獨佔鎖
-                              std::unique_lock<std::shared_mutex> lock(cacheMutex_); // <--- 寫入鎖 (獨佔鎖)
-                              return this->loadAndCacheKeysData(keys);               // 傳遞 this 指標
+                              return this->loadAndCacheKeysData(keys); // 傳遞 this 指標
                           })
                 .map_err([](const ErrorResult &e)
                          { return ErrorResult{e.code, "LoadAll 操作失敗: " + e.message}; });
@@ -278,8 +259,8 @@ namespace finance::infrastructure::storage
          */
         Result<void, ErrorResult> setData(const std::string &key, const SummaryData &data) override
         {
-            std::unique_lock<std::shared_mutex> lock(cacheMutex_); // <--- 寫入鎖 (獨佔鎖)
-            summaryCacheData_[key] = data;                         // 使用 operator[] 會覆蓋或插入
+            // std::unique_lock<std::shared_mutex> lock(cacheMutex_); // <--- 寫入鎖 (獨佔鎖)
+            summaryCacheData_[key] = data; // 使用 operator[] 會覆蓋或插入
             return Result<void, ErrorResult>::Ok();
         }
 
@@ -301,8 +282,8 @@ namespace finance::infrastructure::storage
             // 假設 AreaBranchProvider 的方法是執行緒安全的 (通常靜態配置提供者是)
             company_summary.belong_branches = config::AreaBranchProvider::getAllBranches();
 
-            {                                                          // 讀取快取資料以計算總和
-                std::shared_lock<std::shared_mutex> lock(cacheMutex_); // <--- 讀取鎖 (共享鎖)
+            { // 讀取快取資料以計算總和
+                // std::shared_lock<std::shared_mutex> lock(cacheMutex_); // <--- 讀取鎖 (共享鎖)
                 for (const std::string &officeId : config::AreaBranchProvider::getBackofficeIds())
                 {
                     const std::string key = "summary:" + officeId + ":" + stock_id;
@@ -349,7 +330,7 @@ namespace finance::infrastructure::storage
             auto res = redisClient_->del(key);
             if (res.is_ok())
             {
-                std::unique_lock<std::shared_mutex> lock(cacheMutex_); // <--- 寫入鎖 (獨佔鎖)
+                // std::unique_lock<std::shared_mutex> lock(cacheMutex_); // <--- 寫入鎖 (獨佔鎖)
                 summaryCacheData_.erase(key);
                 return true;
             }
@@ -359,7 +340,7 @@ namespace finance::infrastructure::storage
     private:
         std::unique_ptr<RedisPlusPlusClient<SummaryData, ErrorResult>> redisClient_; // Redis 客戶端
         std::unordered_map<std::string, SummaryData> summaryCacheData_;              // 本地緩存
-        mutable std::shared_mutex cacheMutex_;                                       // <--- 新增: 用於保護 summaryCacheData_ 的讀寫鎖, mutable 允許在 const 方法中鎖定 (如果有的話)
+        // mutable std::shared_mutex cacheMutex_;                                       // <--- 新增: 用於保護 summaryCacheData_ 的讀寫鎖, mutable 允許在 const 方法中鎖定 (如果有的話)
         bool initRedisSearchIndex_ = false;
 
         /**
@@ -439,6 +420,7 @@ namespace finance::infrastructure::storage
         {
             // **重要**: 此方法假設在呼叫它之前，呼叫者已經獲取了 cacheMutex_ 的獨佔鎖。
             // 例如，在 loadAll() 中。
+            // std::unique_lock<std::shared_mutex> lock(cacheMutex_); // <--- 寫入鎖 (獨佔鎖)
             summaryCacheData_.clear(); // 寫操作
             size_t loaded = 0;
             for (const auto &key : keys)

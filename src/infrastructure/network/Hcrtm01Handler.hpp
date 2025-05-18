@@ -64,55 +64,69 @@ namespace finance::infrastructure::network
 
             struct domain::SummaryData *summary_data = get_result.unwrap();
 
-            // Convert to integers
-            CONVERT_BACKOFFICE_INT64(hcrtm01, margin_amount);
+            // 將從 ELD001 解析出的所有相關數值存入 SummaryData 的 h01_* 欄位
+            summary_data->stock_id = stock_id;                                                              // 確保 stock_id 被設置
+            summary_data->area_center = dataAreaCenter;                                                     // 確保 area_center 被設置
+            summary_data->belong_branches = config::AreaBranchProvider::getBranchesForArea(dataAreaCenter); // 更新分支資訊
+
+            // 轉換並儲存所有 HCRTM01 的數值到 SummaryData 的 h01_* 欄位
+            // 使用 CONVERT_BACKOFFICE_INT64 宏來處理轉換和錯誤檢查
+            CONVERT_BACKOFFICE_INT64(hcrtm01, margin_amount); // 例如這樣轉換第一個欄位
+            summary_data->h01_margin_amount = margin_amount;  // 儲存轉換後的數值
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, margin_buy_order_amount);
+            summary_data->h01_margin_buy_order_amount = margin_buy_order_amount;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, margin_sell_match_amount);
+            summary_data->h01_margin_sell_match_amount = margin_sell_match_amount;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, margin_qty);
+            summary_data->h01_margin_qty = margin_qty;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, margin_buy_order_qty);
+            summary_data->h01_margin_buy_order_qty = margin_buy_order_qty;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, margin_sell_match_qty);
+            summary_data->h01_margin_sell_match_qty = margin_sell_match_qty;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, short_amount);
+            summary_data->h01_short_amount = short_amount;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, short_sell_order_amount);
+            summary_data->h01_short_sell_order_amount = short_sell_order_amount;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, short_qty);
+            summary_data->h01_short_qty = short_qty;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, short_sell_order_qty);
+            summary_data->h01_short_sell_order_qty = short_sell_order_qty;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, short_after_hour_sell_order_amount);
+            summary_data->h01_short_after_hour_sell_order_amount = short_after_hour_sell_order_amount;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, short_after_hour_sell_order_qty);
+            summary_data->h01_short_after_hour_sell_order_qty = short_after_hour_sell_order_qty;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, short_sell_match_amount);
+            summary_data->h01_short_sell_match_amount = short_sell_match_amount;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, short_sell_match_qty);
+            summary_data->h01_short_sell_match_qty = short_sell_match_qty;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, margin_after_hour_buy_order_amount);
+            summary_data->h01_margin_after_hour_buy_order_amount = margin_after_hour_buy_order_amount;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, margin_after_hour_buy_order_qty);
+            summary_data->h01_margin_after_hour_buy_order_qty = margin_after_hour_buy_order_qty;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, margin_buy_match_amount);
+            summary_data->h01_margin_buy_match_amount = margin_buy_match_amount;
+
             CONVERT_BACKOFFICE_INT64(hcrtm01, margin_buy_match_qty);
+            summary_data->h01_margin_buy_match_qty = margin_buy_match_qty;
 
-            // 處理後資料
-            int64_t after_margin_available_amount = margin_amount - margin_buy_match_amount + margin_sell_match_amount - margin_after_hour_buy_order_amount;
-            int64_t after_margin_available_qty = margin_qty - margin_buy_match_qty + margin_sell_match_qty - margin_after_hour_buy_order_qty;
-            int64_t after_short_available_amount = short_amount - short_sell_match_amount - short_after_hour_sell_order_amount;
-            int64_t after_short_available_qty = short_qty - short_sell_order_qty - short_after_hour_sell_order_qty;
-            int64_t margin_available_amount = margin_amount - margin_buy_order_amount + margin_sell_match_amount;
-            int64_t margin_available_qty = margin_qty - margin_buy_order_qty + margin_sell_match_qty;
-            int64_t short_available_amount = short_amount - short_sell_order_amount;
-            int64_t short_available_qty = short_qty - short_sell_order_qty;
-
-            // Calculate available amounts and quantities
-            summary_data->stock_id = stock_id;
-            summary_data->area_center = dataAreaCenter;
-
-            // DEBUG: 加上 資買互抵 temp 值
-            const int64_t buy_offset = summary_data->margin_buy_offset_qty;
-            const int64_t sell_offset = summary_data->short_sell_offset_qty;
-            summary_data->margin_available_qty = margin_available_qty + buy_offset;
-            summary_data->after_margin_available_qty = after_margin_available_qty + buy_offset;
-            summary_data->short_available_qty = short_available_qty + sell_offset;
-            summary_data->after_short_available_qty = after_short_available_qty + sell_offset;
-
-            // 原先的內容
-            summary_data->margin_available_amount = margin_available_amount;
-            summary_data->short_available_amount = short_available_amount;
-            summary_data->after_margin_available_amount = after_margin_available_amount;
-            summary_data->after_short_available_amount = after_short_available_amount;
-            // Add branch information
-            summary_data->belong_branches = config::AreaBranchProvider::getBranchesForArea(dataAreaCenter);
+            // --- 呼叫 SummaryData 的方法進行計算 ---
+            summary_data->calculate_availables();
 
             auto sync_result = repo_->sync(stock_id, summary_data);
 

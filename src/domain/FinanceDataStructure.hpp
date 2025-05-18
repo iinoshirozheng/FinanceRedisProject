@@ -12,6 +12,7 @@ namespace finance::domain
     */
     struct SummaryData
     {
+        // 最終計算後的可用數量
         int64_t margin_available_amount = 0;
         int64_t margin_available_qty = 0;
         int64_t short_available_amount = 0;
@@ -20,13 +21,58 @@ namespace finance::domain
         int64_t after_margin_available_qty = 0;
         int64_t after_short_available_amount = 0;
         int64_t after_short_available_qty = 0;
+
         std::string stock_id;
         std::string area_center;
         std::vector<std::string> belong_branches;
 
-        // 新增資買賣互抵張數 (temp data)
-        int64_t margin_buy_offset_qty;
-        int16_t short_sell_offset_qty;
+        // --- 新增：儲存從 ELD001 (HCRTM01) 收到的關鍵原始數據 ---
+        // 您需要根據 ELD001 的定義，選擇用於計算可用數量的所有相關欄位
+        int64_t h01_margin_amount = 0;
+        int64_t h01_margin_buy_order_amount = 0;
+        int64_t h01_margin_sell_match_amount = 0;
+        int64_t h01_margin_qty = 0;
+        int64_t h01_margin_buy_order_qty = 0;
+        int64_t h01_margin_sell_match_qty = 0;
+        int64_t h01_short_amount = 0;
+        int64_t h01_short_sell_order_amount = 0;
+        int64_t h01_short_qty = 0;
+        int64_t h01_short_sell_order_qty = 0;
+        int64_t h01_short_after_hour_sell_order_amount = 0;
+        int64_t h01_short_after_hour_sell_order_qty = 0;
+        int64_t h01_short_sell_match_amount = 0;
+        int64_t h01_short_sell_match_qty = 0;
+        int64_t h01_margin_after_hour_buy_order_amount = 0;
+        int64_t h01_margin_after_hour_buy_order_qty = 0;
+        int64_t h01_margin_buy_match_amount = 0;
+        int64_t h01_margin_buy_match_qty = 0;
+
+        // --- 新增：儲存從 ELD002 (HCRTM05P) 收到的關鍵原始數據（資買互抵張數） ---
+        // 注意：根據您的原始 struct 定義，05p 的 short_sell_offset_qty 是 char[6]，但在您 SummaryData 中是 int16_t。
+        // 為了和 01 的 int64_t 一致且更安全，建議都轉為 int64_t 儲存。這裡假設儲存 int64_t。
+        int64_t h05p_margin_buy_offset_qty = 0;
+        int64_t h05p_short_sell_offset_qty = 0;
+
+        // --- 新增：計算所有可用數量的函數 ---
+        void calculate_availables()
+        {
+            // 根據 HCRTM01 和 HCRTM05P 的最新原始數據進行計算
+            margin_available_amount = h01_margin_amount - h01_margin_buy_order_amount + h01_margin_sell_match_amount;
+            // 將 05P 的資買互抵數量加到對應的可用數量上
+            margin_available_qty = h01_margin_qty - h01_margin_buy_order_qty + h01_margin_sell_match_qty + h05p_margin_buy_offset_qty;
+
+            short_available_amount = h01_short_amount - h01_short_sell_order_amount;
+            // 將 05P 的券賣互抵數量加到對應的可用數量上
+            short_available_qty = h01_short_qty - h01_short_sell_order_qty + h05p_short_sell_offset_qty;
+
+            after_margin_available_amount = h01_margin_amount - h01_margin_buy_match_amount + h01_margin_sell_match_amount - h01_margin_after_hour_buy_order_amount;
+            // 將 05P 的資買互抵數量加到對應的盤後可用數量上
+            after_margin_available_qty = h01_margin_qty - h01_margin_buy_match_qty + h01_margin_sell_match_qty - h01_margin_after_hour_buy_order_qty + h05p_margin_buy_offset_qty;
+
+            after_short_available_amount = h01_short_amount - h01_short_sell_match_amount - h01_short_after_hour_sell_order_amount;
+            // 將 05P 的券賣互抵數量加到對應的盤後可用數量上
+            after_short_available_qty = h01_short_qty - h01_short_sell_order_qty - h01_short_after_hour_sell_order_qty + h05p_short_sell_offset_qty;
+        }
     };
 
     /* @ Struct Name: MessageDataHCRTM01
