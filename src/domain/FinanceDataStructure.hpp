@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <string>
@@ -13,14 +14,14 @@ namespace finance::domain
     struct SummaryData
     {
         // 最終計算後的可用數量
-        int64_t margin_available_amount = 0;
-        int64_t margin_available_qty = 0;
-        int64_t short_available_amount = 0;
-        int64_t short_available_qty = 0;
-        int64_t after_margin_available_amount = 0;
-        int64_t after_margin_available_qty = 0;
-        int64_t after_short_available_amount = 0;
-        int64_t after_short_available_qty = 0;
+        int64_t margin_available_amount = 0;       // 融資可用總金額
+        int64_t margin_available_qty = 0;          // 融資可用張數
+        int64_t short_available_amount = 0;        // 融券可用總金額
+        int64_t short_available_qty = 0;           // 融券可用張數
+        int64_t after_margin_available_amount = 0; // 盤後融資可用總金額
+        int64_t after_margin_available_qty = 0;    // 盤後融資可用張數
+        int64_t after_short_available_amount = 0;  // 盤後融券可用總金額
+        int64_t after_short_available_qty = 0;     // 盤後融券可用張數
 
         std::string stock_id;
         std::string area_center;
@@ -57,20 +58,40 @@ namespace finance::domain
         void calculate_availables()
         {
             // 根據 HCRTM01 和 HCRTM05P 的最新原始數據進行計算
+            // ============================== 開盤資料 ==============================
+
+            // 跟原先一樣 margin_available_amount 融資可用總金額 = margin_amount 融資控管額度 - margin_buy_order_amount 資買委託融資金 + margin_sell_match_amount 資賣成交融資金;
             margin_available_amount = h01_margin_amount - h01_margin_buy_order_amount + h01_margin_sell_match_amount;
+
             // 將 05P 的資買互抵數量加到對應的可用數量上
+            // 原先 margin_available_qty = margin_qty - margin_buy_order_qty + margin_sell_match_qty;
+            // 更改後 margin_available_qty 融資可用張數 = h01_margin_qty 融資控管張數 - h01_margin_buy_order_qty 資買委託張數 + h01_margin_sell_match_qty 資賣成交張數 + h05p_margin_buy_offset_qty 資買互抵張數;
             margin_available_qty = h01_margin_qty - h01_margin_buy_order_qty + h01_margin_sell_match_qty + h05p_margin_buy_offset_qty;
 
+            // 跟原先一樣 short_available_amount 融券可用總金額 = short_amount 融券控管額度 - short_sell_order_amount 券賣委託價金;
             short_available_amount = h01_short_amount - h01_short_sell_order_amount;
+
             // 將 05P 的券賣互抵數量加到對應的可用數量上
+            // 原先 short_available_qty = short_qty - short_sell_order_qty;
+            // 修改後 short_available_qty 融券可用張數 = h01_short_qty 融券控管張數 - h01_short_sell_order_qty 券賣委託張數 + h05p_short_sell_offset_qty 券賣互抵張數;
             short_available_qty = h01_short_qty - h01_short_sell_order_qty + h05p_short_sell_offset_qty;
 
+            // ============================== 盤後資料 ==============================
+
+            // 跟原先一樣 after_margin_available_amount 盤後融資可用總金額 = margin_amount 融資控管額度 - margin_buy_match_amount 資買成交融資金額 + margin_sell_match_amount 資賣成交融資金額 - margin_after_hour_buy_order_amount 資買盤後委託融資金額;
             after_margin_available_amount = h01_margin_amount - h01_margin_buy_match_amount + h01_margin_sell_match_amount - h01_margin_after_hour_buy_order_amount;
+
             // 將 05P 的資買互抵數量加到對應的盤後可用數量上
+            // 原先 after_margin_available_qty = margin_qty - margin_buy_match_qty + margin_sell_match_qty - margin_after_hour_buy_order_qty;
+            // 修改後 after_margin_available_qty 盤後融資可用張數 = h01_margin_qty 融資控管張數 - h01_margin_buy_match_qty 資買成交張數 + h01_margin_sell_match_qty 資賣成交張數 - h01_margin_after_hour_buy_order_qty 資買盤後委託張數 + h05p_margin_buy_offset_qty 資買互抵張數;
             after_margin_available_qty = h01_margin_qty - h01_margin_buy_match_qty + h01_margin_sell_match_qty - h01_margin_after_hour_buy_order_qty + h05p_margin_buy_offset_qty;
 
+            // 跟原先一樣 after_short_available_amount 盤後融券可用總金額 = short_amount 融券控管額度 - short_sell_match_amount 券賣成交價金 - short_after_hour_sell_order_amount 券賣盤後委託價金;
             after_short_available_amount = h01_short_amount - h01_short_sell_match_amount - h01_short_after_hour_sell_order_amount;
+
             // 將 05P 的券賣互抵數量加到對應的盤後可用數量上
+            // 原先 after_short_available_qty = short_qty - short_sell_order_qty - short_after_hour_sell_order_qty;
+            // 修改後 after_short_available_qty 盤後融券可用張數 = h01_short_qty 融券控管張數 - h01_short_sell_order_qty 券賣委託張數 - h01_short_after_hour_sell_order_qty 券賣盤後委託張數 + h05p_short_sell_offset_qty 券賣互抵張數;
             after_short_available_qty = h01_short_qty - h01_short_sell_order_qty - h01_short_after_hour_sell_order_qty + h05p_short_sell_offset_qty;
         }
     };

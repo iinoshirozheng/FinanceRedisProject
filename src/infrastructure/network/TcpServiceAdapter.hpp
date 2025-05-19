@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <memory>
@@ -185,7 +186,7 @@ namespace finance::infrastructure::network
                 auto seg = *segOpt;
 
                 // 心跳過濾
-                if (seg.totalLen() < sizeof(domain::FinancePackageMessage) - sizeof(domain::ApData) - 10)
+                if (seg.totalLen() <= 3)
                 {
                     LOG_F(INFO, "Consumer: Dropping potential keep alive packet with size %zu", seg.totalLen());
                     ringBuffer_.dequeue(seg.totalLen());

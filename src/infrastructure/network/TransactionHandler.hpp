@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include "domain/IPackageHandler.hpp"
@@ -24,9 +25,10 @@ namespace finance::infrastructure::network
     class TransactionProcessor : public domain::IPackageHandler
     {
     public:
-        explicit TransactionProcessor()
+        explicit TransactionProcessor(std::shared_ptr<IFinanceRepository<SummaryData, ErrorResult>> repo)
         {
-            // Note: Handlers should be registered externally, not here
+            registerHandler("ELD001", std::make_unique<infrastructure::network::Hcrtm01Handler>(repo));
+            registerHandler("ELD002", std::make_unique<infrastructure::network::Hcrtm05pHandler>(repo));
         }
 
         // Implement IPackageHandler interface
@@ -39,7 +41,7 @@ namespace finance::infrastructure::network
                     ErrorResult{ErrorCode::InvalidPacket, "Invalid entry type"});
 
             // 2) Properly extract t_code with correct handling of null termination
-            std::string tcode = std::string(pkg.t_code, strnlen(pkg.t_code, sizeof(pkg.t_code)));
+            std::string tcode = std::string(pkg.t_code, sizeof(pkg.t_code));
             // Alternative using FinanceUtils:
             // std::string tcode = FinanceUtils::trim_right(pkg.t_code, sizeof(pkg.t_code));
 
@@ -64,6 +66,7 @@ namespace finance::infrastructure::network
             return result;
         }
 
+    private:
         // Register a handler for a specific transaction code
         void registerHandler(const std::string &tcode, std::unique_ptr<IPackageHandler> handler)
         {
@@ -71,7 +74,6 @@ namespace finance::infrastructure::network
             LOG_F(INFO, "Registered handler for t_code '%s'", tcode.c_str());
         }
 
-    private:
         std::unordered_map<std::string, std::unique_ptr<IPackageHandler>> handlers_;
     };
 }

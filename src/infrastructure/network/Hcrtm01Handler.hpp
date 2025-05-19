@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include "domain/IPackageHandler.hpp"
@@ -65,9 +66,9 @@ namespace finance::infrastructure::network
             struct domain::SummaryData *summary_data = get_result.unwrap();
 
             // 將從 ELD001 解析出的所有相關數值存入 SummaryData 的 h01_* 欄位
-            summary_data->stock_id = stock_id;                                                              // 確保 stock_id 被設置
-            summary_data->area_center = dataAreaCenter;                                                     // 確保 area_center 被設置
-            summary_data->belong_branches = config::AreaBranchProvider::getBranchesForArea(dataAreaCenter); // 更新分支資訊
+            summary_data->stock_id = stock_id;                                                               // 確保 stock_id 被設置
+            summary_data->area_center = dataAreaCenter;                                                      // 確保 area_center 被設置
+            summary_data->belong_branches = config::AreaBranchProvider::getBranchesFromArea(dataAreaCenter); // 更新分支資訊
 
             // 轉換並儲存所有 HCRTM01 的數值到 SummaryData 的 h01_* 欄位
             // 使用 CONVERT_BACKOFFICE_INT64 宏來處理轉換和錯誤檢查

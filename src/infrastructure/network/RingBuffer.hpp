@@ -190,7 +190,7 @@ namespace finance::infrastructure::network
         }
 
         /**
-         * 搜尋首個 '\n' 並填充 PacketRef，並回傳是否跨界
+         * 搜尋首個 '\\n' 並填充 PacketRef，並回傳是否跨界
          */
         bool findPacket(PacketRef &ref, bool &isCrossBoundary) const noexcept
         {
@@ -202,7 +202,7 @@ namespace finance::infrastructure::network
 
             size_t idx = h & Mask;
             size_t len1 = std::min(total, CAP - idx);
-            // 在第一段尋找 '\n'
+            // 在第一段尋找 '\\n'
             if (auto p = static_cast<const char *>(
                     std::memchr(buffer_ + idx, '\n', len1)))
             {
@@ -211,7 +211,7 @@ namespace finance::infrastructure::network
                 isCrossBoundary = false;
                 return true;
             }
-            // 在第二段尋找 '\n' (如果存在第二段的話)
+            // 在第二段尋找 '\\n' (如果存在第二段的話)
             size_t wrap = total - len1;
             if (wrap > 0)
             {
@@ -224,11 +224,11 @@ namespace finance::infrastructure::network
                     return true;
                 }
             }
-            return false; // 沒有找到 '\n'
+            return false; // 沒有找到 '\\n'
         }
 
         /**
-         * 搜尋首個 '\n' 並填充 PacketRef
+         * 搜尋首個 '\\n' 並填充 PacketRef
          */
         bool findPacket(PacketRef &ref) const noexcept
         {
@@ -263,7 +263,7 @@ namespace finance::infrastructure::network
             // 發佈消費：更新 head 指針，通知生產者空間已釋放。
             // 使用 memory_order_release 確保在更新 head_ 之前的所有讀取操作（處理數據）
             // 對生產者是可見的。
-            head_.store((h + n) & Mask, std::memory_order_release);
+            head_.store(h + n, std::memory_order_release);
         }
 
         /**
@@ -353,10 +353,10 @@ namespace finance::infrastructure::network
             size_t len1 = std::min(total, CAP - idx); // 第一段連續可讀的長度
             const char *p1 = buffer_ + idx;
 
-            // 3) 在第一段找 '\n'
+            // 3) 在第一段找 '\\n'
             if (auto p = static_cast<const char *>(std::memchr(p1, '\n', len1)))
             {
-                size_t packetLen = (p - p1) + 1; // 包含 '\n' 在內的封包總長度
+                size_t packetLen = (p - p1) + 1; // 包含 '\\n' 在內的封包總長度
                 // 驗證封包長度是否合理 (例如大於某個最小長度)
                 if (packetLen > total)
                 {
@@ -369,13 +369,13 @@ namespace finance::infrastructure::network
                 return PacketSeg{p1, packetLen, nullptr, 0}; // 封包在第一段
             }
 
-            // 4) 如果第一段沒有找到 '\n'，並且有跨界數據，在第二段找 '\n'
+            // 4) 如果第一段沒有找到 '\\n'，並且有跨界數據，在第二段找 '\\n'
             size_t wrap = total - len1; // 第二段的長度 (如果 RingBuffer 跨界)
             if (wrap > 0)
             {
                 if (auto q = static_cast<const char *>(std::memchr(buffer_, '\n', wrap)))
                 {
-                    size_t packetLen = len1 + (q - buffer_) + 1; // 總長度 = 第一段長度 + 第二段中到 '\n' 的長度 + 1
+                    size_t packetLen = len1 + (q - buffer_) + 1; // 總長度 = 第一段長度 + 第二段中到 '\\n' 的長度 + 1
                     // 驗證封包長度是否合理
                     if (packetLen > total)
                     {
@@ -386,8 +386,8 @@ namespace finance::infrastructure::network
                 }
             }
 
-            // 如果緩衝區中有數據但沒有找到完整的封包 (以 '\n' 結尾)
-            // LOG_F(DEBUG, "getNextPacket: Found data (total %zu) but no complete packet (no '\\n').", total);
+            // 如果緩衝區中有數據但沒有找到完整的封包 (以 '\\n' 結尾)
+            // LOG_F(DEBUG, "getNextPacket: Found data (total %zu) but no complete packet (no '\\\\n').", total);
             return std::nullopt; // 沒有找到完整的封包
         }
 

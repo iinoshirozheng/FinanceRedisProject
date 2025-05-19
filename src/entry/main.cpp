@@ -1,3 +1,4 @@
+
 #include "infrastructure/network/TransactionHandler.hpp"
 #include "infrastructure/network/Hcrtm01Handler.hpp"
 #include "infrastructure/network/Hcrtm05pHandler.hpp"
@@ -48,21 +49,24 @@ int main(int argc, char *argv[])
         if (!infrastructure::config::ConnectionConfigProvider::loadFromFile("connection.json"))
         {
             LOG_F(ERROR, "Failed to load connection configuration");
-            std::cerr << "ERROR: Failed to load connection configuration\\n";
-            return 1;
-        }
-
-        // Load area branch config
-        if (!infrastructure::config::AreaBranchProvider::loadFromFile("area_branch.json"))
-        {
-            LOG_F(ERROR, "Failed to load area branch configuration");
-            std::cerr << "ERROR: Failed to load area branch configuration\\n";
+            std::cerr << "ERROR: Failed to load connection configuration\\\\n";
             return 1;
         }
 
         LOG_F(INFO, "Configurations loaded successfully");
         LOG_F(INFO, "Redis URL: %s", infrastructure::config::ConnectionConfigProvider::redisUri().c_str());
         LOG_F(INFO, "Server Port: %d", infrastructure::config::ConnectionConfigProvider::serverPort());
+
+        // Load area branch config
+        if (!infrastructure::config::AreaBranchProvider::loadFromFile("area_branch.json"))
+        {
+            LOG_F(ERROR, "Failed to load area branch configuration");
+            std::cerr << "ERROR: Failed to load area branch configuration\\\\n";
+            return 1;
+        }
+
+        LOG_F(INFO, "Area Branch loaded successfully");
+        LOG_F(INFO, "Area Branch loaded successfully");
 
         // Create repository with exception handling
         std::shared_ptr<infrastructure::storage::RedisSummaryAdapter> redisRepo;
@@ -75,20 +79,15 @@ int main(int argc, char *argv[])
         catch (const std::exception &e)
         {
             LOG_F(ERROR, "Failed to create Redis adapter: %s", e.what());
-            std::cerr << "ERROR: Redis initialization failed: " << e.what() << "\\n";
-            std::cerr << "Please ensure Redis server is available.\\n";
+            std::cerr << "ERROR: Redis initialization failed: " << e.what() << "\\\\n";
+            std::cerr << "Please ensure Redis server is available.\\\\n";
             return 1;
         }
 
         // Create transaction processor and register handlers
         LOG_F(INFO, "Setting up transaction handlers...");
-        auto processor = std::make_shared<infrastructure::network::TransactionProcessor>();
+        auto processor = std::make_shared<infrastructure::network::TransactionProcessor>(redisRepo);
 
-        // Register handlers with proper repository injection
-        processor->registerHandler("ELD001",
-                                   std::make_unique<infrastructure::network::Hcrtm01Handler>(redisRepo));
-        processor->registerHandler("ELD002",
-                                   std::make_unique<infrastructure::network::Hcrtm05pHandler>(redisRepo));
         LOG_F(INFO, "Transaction handlers registered");
 
         // Create the FinanceService
@@ -101,7 +100,7 @@ int main(int argc, char *argv[])
         if (initResult.is_err())
         {
             LOG_F(ERROR, "Failed to initialize Finance Service: %s", initResult.unwrap_err().message.c_str());
-            std::cerr << "ERROR: " << initResult.unwrap_err().message << "\\n";
+            std::cerr << "ERROR: " << initResult.unwrap_err().message << "\\\\n";
             return 1;
         }
 
@@ -111,7 +110,7 @@ int main(int argc, char *argv[])
         if (runResult.is_err())
         {
             LOG_F(ERROR, "Finance Service failed: %s", runResult.unwrap_err().message.c_str());
-            std::cerr << "ERROR: " << runResult.unwrap_err().message << "\\n";
+            std::cerr << "ERROR: " << runResult.unwrap_err().message << "\\\\n";
             return 1;
         }
 
@@ -120,13 +119,13 @@ int main(int argc, char *argv[])
     catch (const std::exception &e)
     {
         LOG_F(ERROR, "Unhandled exception: %s", e.what());
-        std::cerr << "FATAL ERROR: " << e.what() << "\\n";
+        std::cerr << "FATAL ERROR: " << e.what() << "\\\\n";
         return 1;
     }
     catch (...)
     {
         LOG_F(ERROR, "Unknown error occurred");
-        std::cerr << "FATAL ERROR: Unknown exception caught\\n";
+        std::cerr << "FATAL ERROR: Unknown exception caught\\\\n";
         return 1;
     }
 }

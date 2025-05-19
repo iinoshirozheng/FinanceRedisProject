@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include "domain/IPackageHandler.hpp"
@@ -83,7 +84,7 @@ namespace finance::infrastructure::network
             // 如果 SummaryData 是新創建的，可能需要在這裡根據 area_center 設置 belong_branches
             if (summary_data->belong_branches.empty())
             {
-                summary_data->belong_branches = config::AreaBranchProvider::getBranchesForArea(area_center);
+                summary_data->belong_branches = config::AreaBranchProvider::getBranchesFromArea(area_center);
             }
 
             LOG_F(INFO, "Processed 05p for stock_id=%s, area_center=%s, margin_buy_offset_qty=%lld, short_sell_offset_qty=%lld",

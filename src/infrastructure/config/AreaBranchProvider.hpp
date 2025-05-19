@@ -10,6 +10,7 @@
 #include <mutex>
 #include <algorithm>
 #include <vector> // 包含 vector
+#include <sstream>
 
 namespace finance::infrastructure::config
 {
@@ -49,6 +50,8 @@ namespace finance::infrastructure::config
                     allBranchesVec_.assign(allBranchesSet_.begin(), allBranchesSet_.end());
                     backofficeIdsVec_.assign(backofficeIdsSet_.begin(), backofficeIdsSet_.end()); });
 
+                printAreaToBranches();
+
                 return true;
             }
             catch (const std::exception &e)
@@ -58,7 +61,7 @@ namespace finance::infrastructure::config
             }
         }
 
-        inline static const std::vector<std::string> &getBranchesForArea(const std::string &areaId) noexcept
+        inline static const std::vector<std::string> &getBranchesFromArea(const std::string &areaId) noexcept
         {
             auto it = areaToBranches_.find(areaId);
             if (it != areaToBranches_.end())
@@ -67,6 +70,35 @@ namespace finance::infrastructure::config
             }
             static const std::vector<std::string> emptyVec;
             return emptyVec;
+        }
+
+        inline static void printAreaToBranches()
+        {
+            std::vector<std::string> sortedKeys;
+            for (const auto &[area, _] : areaToBranches_)
+            {
+                sortedKeys.push_back(area);
+            }
+            std::sort(sortedKeys.begin(), sortedKeys.end());
+
+            for (const auto &area : sortedKeys)
+            {
+                const auto &branches = areaToBranches_.at(area);
+                std::ostringstream oss;
+                oss << "area_center: " << area << ", branches: [";
+                for (size_t i = 0; i < branches.size(); ++i)
+                {
+                    oss << "\\\""
+                        << branches[i] << "\\\"";
+                    if (i < branches.size() - 1)
+                    {
+                        oss << ", ";
+                    }
+                }
+                oss << "]";
+
+                LOG_F(INFO, "%s", oss.str().c_str());
+            }
         }
 
         // 新增：返回所有分支 ID 的 vector
