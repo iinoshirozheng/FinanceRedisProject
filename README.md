@@ -1,3 +1,4 @@
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/iinoshirozheng/FinanceRedisProject)
 # Finance System
 
 A C++ application for processing finance bills over TCP and maintaining margin and short selling data.
