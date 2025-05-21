@@ -1,4 +1,3 @@
-
 #include "infrastructure/network/TransactionHandler.hpp"
 #include "infrastructure/network/Hcrtm01Handler.hpp"
 #include "infrastructure/network/Hcrtm05pHandler.hpp"
@@ -11,6 +10,7 @@
 #include <iostream>
 #include <filesystem>
 #include <loguru.hpp>
+#include "infrastructure/network/TcpServiceAdapter.hpp"
 
 using namespace finance;
 
@@ -18,7 +18,8 @@ int main(int argc, char *argv[])
 {
     // Initialize logging
     loguru::init(argc, argv);
-    loguru::add_file("finance.log", loguru::Append, loguru::Verbosity_MAX);
+    loguru::add_file("finance_service.log", loguru::Append, loguru::Verbosity_MAX);
+    loguru::g_stderr_verbosity = 1;
 
     bool initialize_redis_index = false;
     // 解析命令列參數
@@ -92,34 +93,38 @@ int main(int argc, char *argv[])
 
         // Create the FinanceService
         LOG_F(INFO, "Creating Finance Service...");
-        application::FinanceService financeService(redisRepo, processor);
+        auto financeService = std::make_shared<finance::application::FinanceService>(redisRepo, processor);
 
         // Initialize the service
         LOG_F(INFO, "Initializing Finance Service...");
-        auto initResult = financeService.initialize();
+        auto initResult = financeService->initialize();
         if (initResult.is_err())
         {
             LOG_F(ERROR, "Failed to initialize Finance Service: %s", initResult.unwrap_err().message.c_str());
-            std::cerr << "ERROR: " << initResult.unwrap_err().message << "\\\\n";
+            std::cerr << "ERROR: " << initResult.unwrap_err().message << "\n";
             return 1;
         }
 
         // Run the service
         LOG_F(INFO, "Running Finance Service...");
-        auto runResult = financeService.run();
+        auto runResult = financeService->run();
         if (runResult.is_err())
         {
-            LOG_F(ERROR, "Finance Service failed: %s", runResult.unwrap_err().message.c_str());
-            std::cerr << "ERROR: " << runResult.unwrap_err().message << "\\\\n";
+            LOG_F(ERROR, "Failed to run Finance Service: %s", runResult.unwrap_err().message.c_str());
+            std::cerr << "ERROR: " << runResult.unwrap_err().message << "\n";
             return 1;
         }
 
+        // Wait for service to complete (if it's not running in background)
+        financeService->wait();
+
+        LOG_F(INFO, "Finance Service completed successfully");
         return 0;
     }
     catch (const std::exception &e)
     {
         LOG_F(ERROR, "Unhandled exception: %s", e.what());
-        std::cerr << "FATAL ERROR: " << e.what() << "\\\\n";
+        std::cerr << "FATAL ERROR: " << e.what() << "\n";
         return 1;
     }
     catch (...)

@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include "domain/IPackageHandler.hpp"
@@ -31,7 +30,7 @@ namespace finance::infrastructure::network
 
         Result<void, ErrorResult> handle(const FinancePackageMessage &pkg) override
         {
-            LOG_F(INFO, "Hcrtm01Handler::handle");
+            LOG_F(INFO, "Hcrtm01Handler::handle (preparing async tasks)");
 
             const auto &hcrtm01 = pkg.ap_data.data.hcrtm01;
 
@@ -66,7 +65,7 @@ namespace finance::infrastructure::network
             struct domain::SummaryData *summary_data = get_result.unwrap();
 
             // 將從 ELD001 解析出的所有相關數值存入 SummaryData 的 h01_* 欄位
-            summary_data->stock_id = stock_id;                                                               // 確保 stock_id 被設置
+            summary_data->stock_id = stock_id;
             summary_data->area_center = dataAreaCenter;                                                      // 確保 area_center 被設置
             summary_data->belong_branches = config::AreaBranchProvider::getBranchesFromArea(dataAreaCenter); // 更新分支資訊
 
@@ -129,30 +128,24 @@ namespace finance::infrastructure::network
             // --- 呼叫 SummaryData 的方法進行計算 ---
             summary_data->calculate_availables();
 
-            auto sync_result = repo_->sync(stock_id, summary_data);
+            // Create a copy of the summary data for async operations
+            SummaryData summary_data_copy = *summary_data;
 
-            if (sync_result.is_err())
-            {
-                // If sync failed, execute the error handling logic originally in map_err
-                const auto &e = sync_result.unwrap_err();
-                LOG_F(ERROR, "Hcrtm01Handler::Failed to sync data for stock_id=%s, error=%s", summary_data->stock_id.c_str(), e.message.c_str());
-                // The handle function needs to return Result<void, ErrorResult>.
-                // Return an Err of that type, wrapping the original error message.
-                return Result<void, ErrorResult>::Err(ErrorResult{e.code, "Hcrtm01Handler::Redis sync error : " + e.message});
-            }
+            // Construct the Redis key
+            std::string redis_key = "summary:" + summary_data_copy.area_center + ":" + summary_data_copy.stock_id;
 
-            auto update_result = repo_->update(stock_id);
+            // Submit async tasks
+            LOG_F(INFO, "Hcrtm01Handler: Submitting async SYNC task for key: %s", redis_key.c_str());
+            auto sync_future = repo_->sync_async(redis_key, summary_data_copy);
 
-            if (update_result.is_err())
-            {
-                // If updateCompanySummary failed, handle the error
-                const auto &e = update_result.unwrap_err();
-                // It's good practice to log the specific failure step
-                LOG_F(ERROR, "Hcrtm01Handler::Failed to update company summary for stock_id=%s, error=%s", summary_data->stock_id.c_str(), e.message.c_str());
-                // Return an Err of type Result<void, ErrorResult>, wrapping the error.
-                return Result<void, ErrorResult>::Err(ErrorResult{e.code, "Hcrtm01Handler::Update Company Summary error : " + e.message}); // More specific error message
-            }
+            LOG_F(INFO, "Hcrtm01Handler: Submitting async UPDATE task for stock_id: %s", summary_data_copy.stock_id.c_str());
+            auto update_future = repo_->update_async(summary_data_copy.stock_id);
 
+            // Log that tasks have been submitted
+            LOG_F(INFO, "Hcrtm01Handler: Async tasks for SYNC and UPDATE submitted for stock_id=%s, area_center=%s.",
+                  summary_data_copy.stock_id.c_str(), summary_data_copy.area_center.c_str());
+
+            // Return success since tasks have been submitted
             return Result<void, ErrorResult>::Ok();
         }
 

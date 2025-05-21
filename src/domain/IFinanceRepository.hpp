@@ -1,8 +1,8 @@
-
 #pragma once
 
 #include <string>
 #include <vector>
+#include <future>
 #include "FinanceDataStructure.hpp"
 #include "Result.hpp"
 
@@ -69,6 +69,21 @@ namespace finance::domain
          * @return 若成功刪除返回 true，失敗返回 false
          */
         virtual bool remove(const std::string &key) = 0;
+
+        /**
+         * @brief 異步同步數據到 Redis
+         * @param key 鍵值，用於標識數據實體
+         * @param data 要同步的數據
+         * @return 異步操作結果的 future
+         */
+        virtual std::future<Result<void, E>> sync_async(const std::string &key, const T &data) = 0;
+
+        /**
+         * @brief 異步更新數據實體
+         * @param key 鍵值，用於標識數據實體
+         * @return 異步操作結果的 future
+         */
+        virtual std::future<Result<void, E>> update_async(const std::string &key) = 0;
     };
 
 } // namespace finance::domain

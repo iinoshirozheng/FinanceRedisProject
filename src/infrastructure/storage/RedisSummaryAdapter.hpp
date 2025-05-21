@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include "domain/Result.hpp"
@@ -8,13 +7,17 @@
 #include "infrastructure/config/AreaBranchProvider.hpp"
 #include "RedisPlusPlusClient.hpp"
 #include "domain/IFinanceRepository.hpp"
+#include "infrastructure/tasks/RedisTask.hpp"
+#include "infrastructure/tasks/RedisWorker.hpp"
 #include <string>
 #include <unordered_map>
-#include <shared_mutex> // <--- 新增: 引入 shared_mutex
+#include <shared_mutex>
 #include <nlohmann/json.hpp>
 #include <loguru.hpp>
 #include <optional>
 #include <vector>
+#include <future>
+#include <functional>
 
 namespace finance::infrastructure::storage
 {
@@ -22,6 +25,8 @@ namespace finance::infrastructure::storage
     using finance::domain::ErrorResult;
     using finance::domain::Result;
     using finance::domain::SummaryData;
+    using finance::infrastructure::tasks::RedisOperationType;
+    using finance::infrastructure::tasks::RedisTask;
 
     /**
      * @brief Redis 上 SummaryData 資料存儲的適配器，提供本地緩存與與 Redis 的同步功能。
@@ -29,10 +34,13 @@ namespace finance::infrastructure::storage
     class RedisSummaryAdapter : public finance::domain::IFinanceRepository<SummaryData, ErrorResult>
     {
     public:
+        using TaskSubmitter = std::function<std::future<Result<void, ErrorResult>>(RedisTask)>;
+
         /**
          * @brief 構造函數但不立即連接 Redis，需要調用 init() 來初始化連線。
          */
-        RedisSummaryAdapter() noexcept = default;
+        RedisSummaryAdapter(TaskSubmitter submitter = nullptr) noexcept
+            : task_submitter_(std::move(submitter)) {}
 
         ~RedisSummaryAdapter() noexcept = default;
 
@@ -169,27 +177,17 @@ namespace finance::infrastructure::storage
          */
         Result<void, ErrorResult> sync(const std::string &key, const SummaryData *data) override
         {
-            // sync 方法的主要職責是將資料寫入 Redis。
-            // 它不直接修改 summaryCacheData_，但它讀取 data 指標指向的內容。
-            // 呼叫 sync 的地方 (如 Hcrtm01Handler, Hcrtm05pHandler) 應確保 data 指標的有效性和其內容的一致性。
-            // 如果 sync 之後還需要更新本地快取中對應 key 的 SummaryData (例如 data 指向的是一個臨時計算的結果，
-            // 並且希望這個結果也更新到快取)，則需要在 sync 之後額外呼叫 setData 並由 setData 負責鎖。
-            // 目前的 IFinanceRepository 介面中，sync 和 setData 是分開的。
-            // 此處我們假設 data 指向的內容在 sync 執行期間是穩定的。
+            std::unique_lock<std::shared_mutex> lock(cacheMutex_);
+            LOG_F(WARNING, "RedisSummaryAdapter: Synchronous SYNC called for key %s. Consider using async version.", key.c_str());
+
             if (!redisClient_)
-            {
                 return Result<void, ErrorResult>::Err(
                     ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 未正確連線"});
-            }
 
             if (data == nullptr)
-            {
-                LOG_F(ERROR, "RedisSummaryAdapter:Unexpact Summary Data null, key=%s", key.c_str());
                 return Result<void, ErrorResult>::Err(
                     ErrorResult{ErrorCode::UnexpectedError, "RedisSummaryAdapter:summary_data = nullptr"});
-            }
 
-            // data 的序列化不涉及對 summaryCacheData_ 的存取，所以此處不需要鎖 cacheMutex_
             return summaryDataToJson(data)
                 .and_then([this, &key](const std::string &j)
                           { return redisClient_->setJson(key, "$", j); })
@@ -272,19 +270,20 @@ namespace finance::infrastructure::storage
          */
         Result<void, ErrorResult> update(const std::string &stock_id) override
         {
-            if (!redisClient_)
-            {
-                return Result<void, ErrorResult>::Err(ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 未正確連線"});
-            }
+            std::unique_lock<std::shared_mutex> lock(cacheMutex_);
+            LOG_F(WARNING, "RedisSummaryAdapter: Synchronous UPDATE called for stock_id %s. Consider using async version.", stock_id.c_str());
 
-            SummaryData company_summary; // 在棧上創建，避免直接修改快取中的元素
+            if (!redisClient_)
+                return Result<void, ErrorResult>::Err(
+                    ErrorResult{ErrorCode::RedisConnectionFailed, "Redis 未正確連線"});
+
+            SummaryData company_summary;
             company_summary.stock_id = stock_id;
             company_summary.area_center = "ALL";
-            // 假設 AreaBranchProvider 的方法是執行緒安全的 (通常靜態配置提供者是)
             company_summary.belong_branches = config::AreaBranchProvider::getAllBranches();
 
-            { // 讀取快取資料以計算總和
-                // std::shared_lock<std::shared_mutex> lock(cacheMutex_); // <--- 讀取鎖 (共享鎖)
+            {
+                std::shared_lock<std::shared_mutex> read_lock(cacheMutex_);
                 for (const std::string &officeId : config::AreaBranchProvider::getBackofficeIds())
                 {
                     const std::string key = "summary:" + officeId + ":" + stock_id;
@@ -302,19 +301,10 @@ namespace finance::infrastructure::storage
                         company_summary.after_short_available_qty += area_summary_data.after_short_available_qty;
                     }
                 }
-            } // <--- 讀取鎖釋放
+            }
 
-            // 將計算得到的 company_summary 同步到 Redis
-            // 這個 sync 操作本身不修改 summaryCacheData_ (基於 sync 的當前實現)
             auto all_key = "summary:ALL:" + stock_id;
-            Result<void, ErrorResult> sync_res = sync(all_key, &company_summary);
-
-            // 如果需要將 company_summary 也更新到本地快取 (例如，如果 "summary:ALL:stock_id" 也被快取管理)
-            // 則需要額外呼叫 setData:
-            // if (sync_res.is_ok()) {
-            //     return setData(all_key, company_summary); // setData 內部有寫入鎖
-            // }
-            return sync_res; // 目前只返回 sync 的結果
+            return sync(all_key, &company_summary);
         }
 
         /**
@@ -338,11 +328,65 @@ namespace finance::infrastructure::storage
             return false;
         }
 
+        /**
+         * @brief 異步同步數據到 Redis
+         * @param key 鍵值，用於標識數據實體
+         * @param data 要同步的數據
+         * @return 異步操作結果的 future
+         */
+        std::future<Result<void, ErrorResult>> sync_async(const std::string &key, const SummaryData &data_to_sync) override
+        {
+            if (!task_submitter_)
+            {
+                std::promise<Result<void, ErrorResult>> err_promise;
+                err_promise.set_value(Result<void, ErrorResult>::Err(
+                    ErrorResult{ErrorCode::InternalError, "Task submitter not initialized in RedisSummaryAdapter"}));
+                return err_promise.get_future();
+            }
+
+            LOG_F(INFO, "RedisSummaryAdapter: Queuing async SYNC task for key %s", key.c_str());
+            return task_submitter_(
+                RedisTask(
+                    RedisOperationType::SYNC_SUMMARY_DATA,
+                    key,
+                    data_to_sync,
+                    nullptr));
+        }
+
+        /**
+         * @brief 異步更新數據實體
+         * @param key 鍵值，用於標識數據實體
+         * @return 異步操作結果的 future
+         */
+        std::future<Result<void, ErrorResult>> update_async(const std::string &stock_id) override
+        {
+            if (!task_submitter_)
+            {
+                std::promise<Result<void, ErrorResult>> err_promise;
+                err_promise.set_value(Result<void, ErrorResult>::Err(
+                    ErrorResult{ErrorCode::InternalError, "Task submitter not initialized"}));
+                return err_promise.get_future();
+            }
+
+            LOG_F(INFO, "RedisSummaryAdapter: Queuing async UPDATE task for stock_id %s", stock_id.c_str());
+            return task_submitter_(
+                RedisTask(
+                    RedisOperationType::UPDATE_COMPANY_SUMMARY,
+                    stock_id,
+                    nullptr));
+        }
+
+        void setTaskSubmitter(TaskSubmitter submitter)
+        {
+            task_submitter_ = std::move(submitter);
+        }
+
     private:
         std::unique_ptr<RedisPlusPlusClient<SummaryData, ErrorResult>> redisClient_; // Redis 客戶端
         std::unordered_map<std::string, SummaryData> summaryCacheData_;              // 本地緩存
-        // mutable std::shared_mutex cacheMutex_;                                       // <--- 新增: 用於保護 summaryCacheData_ 的讀寫鎖, mutable 允許在 const 方法中鎖定 (如果有的話)
+        mutable std::shared_mutex cacheMutex_;                                       // <--- 新增: 用於保護 summaryCacheData_ 的讀寫鎖, mutable 允許在 const 方法中鎖定 (如果有的話)
         bool initRedisSearchIndex_ = false;
+        TaskSubmitter task_submitter_;
 
         /**
          * @brief 將 SummaryData 序列化為 JSON 字串。 (此方法不存取 summaryCacheData_，是純函數)

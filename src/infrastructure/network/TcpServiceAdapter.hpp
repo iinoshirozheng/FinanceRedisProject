@@ -19,6 +19,7 @@
 #include "domain/IPackageHandler.hpp"
 #include "domain/IFinanceRepository.hpp"
 #include "domain/FinanceDataStructure.hpp"
+#include "infrastructure/tasks/RedisWorker.hpp"
 #include "utils/FinanceUtils.hpp" // Not directly used in this file but kept for context
 #include <loguru.hpp>
 
@@ -36,6 +37,7 @@ namespace finance::infrastructure::network
             : serverSocketFd_(-1), // Initialize server socket descriptor to an invalid value
               handler_(std::move(handler)),
               repository_(std::move(repository)),
+              redis_worker_(std::make_unique<tasks::RedisWorker>(repository_)),
               ringBuffer_()
         {
             serverSocketFd_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -97,6 +99,7 @@ namespace finance::infrastructure::network
             }
 
             running_ = true;
+            redis_worker_->start();
             acceptThread_ = std::thread(&TcpServiceAdapter::producer, this);
             processingThread_ = std::thread(&TcpServiceAdapter::consumer, this);
             return true;
@@ -139,6 +142,8 @@ namespace finance::infrastructure::network
                 serverSocketFd_ = -1;
             }
 
+            redis_worker_->stop();
+
             // producer thread should exit as running_ is false and accept() unblocks.
             if (acceptThread_.joinable())
             {
@@ -156,6 +161,95 @@ namespace finance::infrastructure::network
                 LOG_F(INFO, "TcpServiceAdapter: Processing thread joined.");
             }
             LOG_F(INFO, "TcpServiceAdapter: Stop sequence completed.");
+        }
+
+        void consumer()
+        {
+            LOG_F(INFO, "Consumer thread started (Asynchronous Redis processing).");
+            std::vector<char> tmp;
+            tmp.reserve(sizeof(domain::FinancePackageMessage) + 100);
+
+            while (running_.load())
+            {
+                if (ringBuffer_.empty())
+                {
+                    if (!running_.load())
+                    {
+                        break;
+                    }
+                    std::this_thread::yield();
+                    continue;
+                }
+
+                if (!running_.load())
+                    break;
+
+                auto segOpt = ringBuffer_.getNextPacket();
+                if (!segOpt)
+                {
+                    if (!running_.load())
+                    {
+                        break;
+                    }
+                    std::this_thread::yield();
+                    continue;
+                }
+
+                auto seg = *segOpt;
+
+                if (seg.totalLen() <= 3)
+                {
+                    LOG_F(INFO, "Consumer: Dropping potential keep alive packet with size %zu", seg.totalLen());
+                    ringBuffer_.dequeue(seg.totalLen());
+                    continue;
+                }
+
+                const domain::FinancePackageMessage *pkg = nullptr;
+                if (seg.len2 == 0)
+                {
+                    pkg = reinterpret_cast<const domain::FinancePackageMessage *>(seg.ptr1);
+                }
+                else
+                {
+                    tmp.clear();
+                    if (tmp.capacity() < seg.totalLen())
+                    {
+                        tmp.reserve(seg.totalLen() + 100);
+                    }
+                    tmp.resize(seg.totalLen());
+                    std::memcpy(tmp.data(), seg.ptr1, seg.len1);
+                    std::memcpy(tmp.data() + seg.len1, seg.ptr2, seg.len2);
+                    pkg = reinterpret_cast<const domain::FinancePackageMessage *>(tmp.data());
+                }
+
+                auto res = handler_->handle(*pkg);
+                if (res.is_err())
+                {
+                    LOG_F(ERROR, "Consumer: Packet handling/task submission failed for packet size %zu: %s",
+                          seg.totalLen(), res.unwrap_err().message.c_str());
+                }
+                else
+                {
+                    LOG_F(INFO, "Consumer: Packet processed and async Redis tasks submitted for packet size %zu.",
+                          seg.totalLen());
+                }
+
+                ringBuffer_.dequeue(seg.totalLen());
+            }
+
+            LOG_F(INFO, "Consumer thread stopped.");
+        }
+
+        void wait()
+        {
+            if (acceptThread_.joinable())
+            {
+                acceptThread_.join();
+            }
+            if (processingThread_.joinable())
+            {
+                processingThread_.join();
+            }
         }
 
     private:
@@ -345,91 +439,10 @@ namespace finance::infrastructure::network
                   std::hash<std::thread::id>{}(std::this_thread::get_id()));
         }
 
-        // TcpServiceAdapter.hpp - consumer() method
-        void consumer()
-        {
-            LOG_F(INFO, "Consumer thread started (Synchronous processing).");
-            std::vector<char> tmp;
-            tmp.reserve(sizeof(domain::FinancePackageMessage) + 100);
-
-            while (running_.load()) // 主要退出條件
-            {
-                // 等待數據或running_變為false
-                // 可以給waitForData增加一個超時或使其可中斷，但更簡單的是在外部檢查
-                if (ringBuffer_.empty())
-                { // 如果為空
-                    if (!running_.load())
-                    {          // 再次檢查 running_
-                        break; // 如果準備停止，則退出
-                    }
-                    std::this_thread::yield(); // 短暫讓出CPU，避免純粹的忙等待空 RingBuffer
-                    // 或者使用一個帶有超時的條件變數來等待數據，但這會改變 RingBuffer 的設計理念
-                    continue; // 重新開始循環，檢查 running_ 和是否有數據
-                }
-
-                // 到這裡時，RingBuffer 不為空 (或 running_ 在上面已經使其跳出)
-                // 即使 ringBuffer_.waitForData(); 被調用，也要確保它不會無限阻塞
-                // 但由於 waitForData 是自旋，我們主要靠 running_.load() 來退出
-                // ringBuffer_.waitForData(); // 如果保留，確保它不會永遠自旋
-
-                if (!running_.load()) // 在嘗試獲取封包前再次檢查
-                    break;
-
-                auto segOpt = ringBuffer_.getNextPacket();
-                if (!segOpt)
-                {
-                    if (!running_.load())
-                    { // 如果沒有封包且準備停止
-                        break;
-                    }
-                    std::this_thread::yield(); // 如果沒有完整封包，讓出 CPU
-                    continue;
-                }
-
-                // ... (後續處理不變)
-                auto seg = *segOpt;
-
-                if (seg.totalLen() <= 3)
-                {
-                    LOG_F(INFO, "Consumer: Dropping potential keep alive packet with size %zu", seg.totalLen());
-                    ringBuffer_.dequeue(seg.totalLen());
-                    continue;
-                }
-
-                const domain::FinancePackageMessage *pkg = nullptr;
-                if (seg.len2 == 0)
-                {
-                    pkg = reinterpret_cast<const domain::FinancePackageMessage *>(seg.ptr1);
-                }
-                else
-                {
-                    tmp.clear();
-                    if (tmp.capacity() < seg.totalLen())
-                    {
-                        tmp.reserve(seg.totalLen() + 100);
-                    }
-                    tmp.resize(seg.totalLen());
-                    std::memcpy(tmp.data(), seg.ptr1, seg.len1);
-                    std::memcpy(tmp.data() + seg.len1, seg.ptr2, seg.len2);
-                    pkg = reinterpret_cast<const domain::FinancePackageMessage *>(tmp.data());
-                }
-
-                auto res = handler_->handle(*pkg);
-
-                if (res.is_err())
-                {
-                    LOG_F(ERROR, "Consumer: Packet handling failed for packet size %zu: %s", seg.totalLen(), res.unwrap_err().message.c_str());
-                }
-
-                ringBuffer_.dequeue(seg.totalLen());
-            }
-
-            LOG_F(INFO, "Consumer thread stopped.");
-        }
-
         int serverSocketFd_; // Server's listening socket descriptor
         std::shared_ptr<finance::domain::IPackageHandler> handler_;
         std::shared_ptr<finance::domain::IFinanceRepository<finance::domain::SummaryData, finance::domain::ErrorResult>> repository_;
+        std::unique_ptr<tasks::RedisWorker> redis_worker_;
         RingBuffer<RING_BUFFER_SIZE> ringBuffer_;
         std::thread acceptThread_;
         std::thread processingThread_;
