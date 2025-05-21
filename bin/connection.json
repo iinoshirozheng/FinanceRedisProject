@@ -1,6 +1,6 @@
 {
     "redis_url": "tcp://127.0.0.1:6379",
-    "server_port": 9516,
+    "server_port": 9517,
     "socket_timeout_ms": 5000,
     "redis_password": ""
 }
