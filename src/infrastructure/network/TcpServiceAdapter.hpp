@@ -169,7 +169,9 @@ namespace finance::infrastructure::network
         // TcpServiceAdapter.hpp - producer() method
         void producer()
         {
-            LOG_F(INFO, "Producer thread started. TID: %lx. running_ initial value: %d", std::this_thread::get_id(), running_.load(std::memory_order_relaxed));
+            LOG_F(INFO, "Producer thread started. TID: %zu. running_ initial value: %d",
+                  std::hash<std::thread::id>{}(std::this_thread::get_id()),
+                  running_.load(std::memory_order_relaxed));
             try
             {
                 while (running_.load(std::memory_order_relaxed))
@@ -178,29 +180,35 @@ namespace finance::infrastructure::network
                     socklen_t clientAddrLen = sizeof(clientAddr);
                     int clientSocketFd = -1;
 
-                    LOG_F(INFO, "Producer (TID: %lx): Loop top. Attempty to accept. running_=%d, serverSocketFd_=%d",
-                          std::this_thread::get_id(), running_.load(std::memory_order_relaxed), serverSocketFd_);
+                    LOG_F(INFO, "Producer (TID: %zu): Loop top. Attempty to accept. running_=%d, serverSocketFd_=%d",
+                          std::hash<std::thread::id>{}(std::this_thread::get_id()),
+                          running_.load(std::memory_order_relaxed), serverSocketFd_);
 
                     if (serverSocketFd_ < 0)
                     { // 如果 socket 已經無效，直接退出
-                        LOG_F(WARNING, "Producer (TID: %lx): serverSocketFd_ is invalid (%d) before accept. Exiting.", std::this_thread::get_id(), serverSocketFd_);
+                        LOG_F(WARNING, "Producer (TID: %zu): serverSocketFd_ is invalid (%d) before accept. Exiting.",
+                              std::hash<std::thread::id>{}(std::this_thread::get_id()), serverSocketFd_);
                         break;
                     }
 
                     clientSocketFd = accept(serverSocketFd_, (struct sockaddr *)&clientAddr, &clientAddrLen);
                     int accept_errno = errno; // Store errno immediately after accept returns
 
-                    LOG_F(INFO, "Producer (TID: %lx): accept returned %d. errno: %d (%s). running_=%d",
-                          std::this_thread::get_id(), clientSocketFd, accept_errno, strerror(accept_errno), running_.load(std::memory_order_relaxed));
+                    LOG_F(INFO, "Producer (TID: %zu): accept returned %d. errno: %d (%s). running_=%d",
+                          std::hash<std::thread::id>{}(std::this_thread::get_id()),
+                          clientSocketFd, accept_errno, strerror(accept_errno),
+                          running_.load(std::memory_order_relaxed));
 
                     if (!running_.load(std::memory_order_relaxed))
                     {
                         if (clientSocketFd >= 0)
                         {
-                            LOG_F(INFO, "Producer (TID: %lx): Closing client socket %d as running_ is false.", std::this_thread::get_id(), clientSocketFd);
+                            LOG_F(INFO, "Producer (TID: %zu): Closing client socket %d as running_ is false.",
+                                  std::hash<std::thread::id>{}(std::this_thread::get_id()), clientSocketFd);
                             close(clientSocketFd);
                         }
-                        LOG_F(INFO, "Producer (TID: %lx): running_ is false after accept unblocked. Exiting main loop.", std::this_thread::get_id());
+                        LOG_F(INFO, "Producer (TID: %zu): running_ is false after accept unblocked. Exiting main loop.",
+                              std::hash<std::thread::id>{}(std::this_thread::get_id()));
                         break;
                     }
 
@@ -209,30 +217,35 @@ namespace finance::infrastructure::network
                         // EBADF or EINVAL are expected if the listening socket was closed by stop()
                         if (accept_errno == EBADF || accept_errno == EINVAL)
                         {
-                            LOG_F(INFO, "Producer (TID: %lx): accept() failed due to server socket closure (errno %d: %s). Exiting main loop.",
-                                  std::this_thread::get_id(), accept_errno, strerror(accept_errno));
+                            LOG_F(INFO, "Producer (TID: %zu): accept() failed due to server socket closure (errno %d: %s). Exiting main loop.",
+                                  std::hash<std::thread::id>{}(std::this_thread::get_id()),
+                                  accept_errno, strerror(accept_errno));
                             break;
                         }
                         if (accept_errno == EINTR)
                         {
-                            LOG_F(INFO, "Producer (TID: %lx): accept() call interrupted by signal. Continuing loop to re-check running_ flag.", std::this_thread::get_id());
+                            LOG_F(INFO, "Producer (TID: %zu): accept() call interrupted by signal. Continuing loop to re-check running_ flag.",
+                                  std::hash<std::thread::id>{}(std::this_thread::get_id()));
                             continue;
                         }
                         // For other errors, log and continue (or break if appropriate)
-                        LOG_F(ERROR, "Producer (TID: %lx): Accept connection error (errno %d: %s). Continuing.",
-                              std::this_thread::get_id(), accept_errno, strerror(accept_errno));
+                        LOG_F(ERROR, "Producer (TID: %zu): Accept connection error (errno %d: %s). Continuing.",
+                              std::hash<std::thread::id>{}(std::this_thread::get_id()),
+                              accept_errno, strerror(accept_errno));
                         std::this_thread::sleep_for(std::chrono::milliseconds(50)); // Avoid tight loop on persistent accept errors
                         continue;
                     }
 
                     // ... (後續客戶端處理邏輯不變, 但也應包含TID日誌和running_檢查) ...
-                    LOG_F(INFO, "Producer (TID: %lx): Accepted new connection from %s on fd %d",
-                          std::this_thread::get_id(), getPeerAddress(clientAddr).c_str(), clientSocketFd);
+                    LOG_F(INFO, "Producer (TID: %zu): Accepted new connection from %s on fd %d",
+                          std::hash<std::thread::id>{}(std::this_thread::get_id()),
+                          getPeerAddress(clientAddr).c_str(), clientSocketFd);
 
                     // TcpServiceAdapter.hpp - producer() method - Inner client handling loop excerpt
                     // ... (accepts clientSocketFd) ...
-                    LOG_F(INFO, "Producer (TID: %lx): Accepted new connection from %s on fd %d",
-                          std::this_thread::get_id(), getPeerAddress(clientAddr).c_str(), clientSocketFd);
+                    LOG_F(INFO, "Producer (TID: %zu): Accepted new connection from %s on fd %d",
+                          std::hash<std::thread::id>{}(std::this_thread::get_id()),
+                          getPeerAddress(clientAddr).c_str(), clientSocketFd);
 
                     // Inner client handling loop
                     while (running_.load(std::memory_order_relaxed))
@@ -244,7 +257,8 @@ namespace finance::infrastructure::network
                         { // 如果 RingBuffer 滿了
                             if (!running_.load(std::memory_order_relaxed))
                                 break;
-                            LOG_F(INFO, "Producer (TID: %lx, client fd %d): RingBuffer full or no space. Yielding.", std::this_thread::get_id(), clientSocketFd);
+                            LOG_F(INFO, "Producer (TID: %zu, client fd %d): RingBuffer full or no space. Yielding.",
+                                  std::hash<std::thread::id>{}(std::this_thread::get_id()), clientSocketFd);
                             std::this_thread::yield();
                             continue;
                         }
@@ -252,20 +266,25 @@ namespace finance::infrastructure::network
                         // Ensure to log TID here as well and check running_ frequently
                         if (!running_.load(std::memory_order_relaxed))
                         {
-                            LOG_F(INFO, "Producer (TID: %lx, client fd %d): running_ is false in client loop. Breaking.", std::this_thread::get_id(), clientSocketFd);
+                            LOG_F(INFO, "Producer (TID: %zu, client fd %d): running_ is false in client loop. Breaking.",
+                                  std::hash<std::thread::id>{}(std::this_thread::get_id()), clientSocketFd);
                             break;
                         }
 
-                        LOG_F(INFO, "Producer (TID: %lx, client fd %d): Attempting to recv. maxLen=%zu", std::this_thread::get_id(), clientSocketFd, maxLen);
+                        LOG_F(INFO, "Producer (TID: %zu, client fd %d): Attempting to recv. maxLen=%zu",
+                              std::hash<std::thread::id>{}(std::this_thread::get_id()), clientSocketFd, maxLen);
                         ssize_t n = recv(clientSocketFd, writePtr, maxLen, 0); // <<< 여기가 recv 로직입니다.
                         int recv_errno = errno;                                // Store errno immediately
 
-                        LOG_F(INFO, "Producer (TID: %lx, client fd %d): recv returned %zd. errno: %d (%s). running_=%d",
-                              std::this_thread::get_id(), clientSocketFd, n, recv_errno, strerror(recv_errno), running_.load(std::memory_order_relaxed));
+                        LOG_F(INFO, "Producer (TID: %zu, client fd %d): recv returned %zd. errno: %d (%s). running_=%d",
+                              std::hash<std::thread::id>{}(std::this_thread::get_id()),
+                              clientSocketFd, n, recv_errno, strerror(recv_errno),
+                              running_.load(std::memory_order_relaxed));
 
                         if (!running_.load(std::memory_order_relaxed))
                         { // Check running_ immediately after recv returns
-                            LOG_F(INFO, "Producer (TID: %lx, client fd %d): running_ is false after recv. Exiting client loop.", std::this_thread::get_id(), clientSocketFd);
+                            LOG_F(INFO, "Producer (TID: %zu, client fd %d): running_ is false after recv. Exiting client loop.",
+                                  std::hash<std::thread::id>{}(std::this_thread::get_id()), clientSocketFd);
                             break;
                         }
 
@@ -302,12 +321,14 @@ namespace finance::infrastructure::network
                         }
                     } // End inner client handling loop
 
-                    LOG_F(INFO, "Producer (TID: %lx): Closing client socket fd %d.", std::this_thread::get_id(), clientSocketFd);
+                    LOG_F(INFO, "Producer (TID: %zu): Closing client socket fd %d.",
+                          std::hash<std::thread::id>{}(std::this_thread::get_id()), clientSocketFd);
                     close(clientSocketFd); // 關閉客戶端 socket
 
                     if (!running_.load(std::memory_order_relaxed))
                     {
-                        LOG_F(INFO, "Producer (TID: %lx): running_ is false after client handling. Exiting main loop.", std::this_thread::get_id());
+                        LOG_F(INFO, "Producer (TID: %zu): running_ is false after client handling. Exiting main loop.",
+                              std::hash<std::thread::id>{}(std::this_thread::get_id()));
                         break;
                     }
                 } // End main accept loop
@@ -320,7 +341,8 @@ namespace finance::infrastructure::network
             {
                 LOG_F(ERROR, "Producer thread unknown exception");
             }
-            LOG_F(INFO, "Producer thread stopped. TID: %lx", std::this_thread::get_id());
+            LOG_F(INFO, "Producer thread stopped. TID: %zu",
+                  std::hash<std::thread::id>{}(std::this_thread::get_id()));
         }
 
         // TcpServiceAdapter.hpp - consumer() method

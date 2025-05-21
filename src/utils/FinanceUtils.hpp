@@ -46,7 +46,7 @@ namespace finance::utils
             int64_t result = 0;
             bool found_digit = false; // 標記是否已經遇到數字字符
 
-            while (std::isspace(value[length - 1]))
+            while (length > 0 && std::isspace(value[length - 1]))
             {
                 --length;
             }
