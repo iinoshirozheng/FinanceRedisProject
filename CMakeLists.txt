@@ -10,7 +10,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 
 # 第三方庫位置
-set(THIRD_PARTY_DIR /Users/ray/cppackage/third_party)
 message(STATUS "第三方庫目錄: ${THIRD_PARTY_DIR}")
 
 # 引入外部函數
@@ -18,5 +17,5 @@ include(${THIRD_PARTY_DIR}/LinkThirdparty.cmake OPTIONAL)
 message(STATUS "已引入 ${THIRD_PARTY_DIR}/LinkThirdparty.cmake")
 
 # 建立模組化目錄結構
-set(CMAKE_MODULE_PATH "/Users/ray/Desktop/CACB/TestProject/cmake" ${CMAKE_MODULE_PATH})
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 add_subdirectory(cmake)
