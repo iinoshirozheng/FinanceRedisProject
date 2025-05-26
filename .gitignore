@@ -19,6 +19,7 @@ cmake-build-*/
 *.dll
 *.lib
 *.dylib
+*.rdb
 
 # CMake files
 CMakeCache.txt

@@ -21,16 +21,12 @@ RUN ./run.sh --build-only --third-party-dir /opt/third_party
 
 # --- Stage 2: Runner ---
 # ... (與之前類似，從 Builder 的 ${THIRD_PARTY_DIR_ENV}/lib 或 ${DOWNLOAD_TARGET_DIR}/lib 複製 .so 檔案) ...
-FROM registry.access.redhat.com/ubi8/ubi-minimal:latest
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 WORKDIR /app
 COPY --from=builder /app/bin/finance_stock_quota ./finance_stock_quota
-COPY ./bin/area_branch.json ./area_branch.json
-COPY ./bin/connection.json ./connection.json
-RUN microdnf install -y libstdc++ shadow-utils && microdnf clean all
+# RUN microdnf install -y libstdc++ shadow-utils && microdnf clean all
 # 假設 THIRD_PARTY_DIR_ENV 的值是 /opt/downloaded_libs
 RUN chmod +x ./finance_stock_quota
-RUN groupadd -r appgroup && useradd -r -m -g appgroup appuser
-USER appuser
 EXPOSE 9516
 
-CMD ["./finance_stock_quota"]
+CMD ["./finance_stock_quota", "--init"]

@@ -43,7 +43,7 @@ RUN_TESTS=false
 BUILD_ONLY=false
 
 # === 新增：接收第三方函式庫路徑參數 ===
-CUSTOM_THIRD_PARTY_DIR=""
+CUSTOM_THIRD_PARTY_DIR="/Users/ray/cppackage/third_party"
 
 # === 參數解析 ===
 while [[ "$#" -gt 0 ]]; do

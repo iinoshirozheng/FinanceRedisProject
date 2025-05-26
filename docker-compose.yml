@@ -1,0 +1,36 @@
+services:
+  finance-app:
+    build:
+      context: .
+      dockerfile: Containerfile # 或者 Dockerfile，根據您的檔名
+    container_name: finance_stock_quota # 您的 C++ 應用程式容器名稱
+    ports:
+      - "9516:9516" # 將主機的 9516 埠映射到容器的 9516 埠
+    depends_on:
+      - redis # 確保 Redis 服務先啟動
+    restart: unless-stopped
+    volumes:
+      # 從主機掛載設定檔到容器的 /app 目錄下
+      # 假設您的 connection.json 和 area_branch.json 檔案位於
+      # 與 docker-compose.yml 同級的 ./config 目錄下
+      - ./bin/connection.json:/app/connection.json:ro
+      - ./bin/area_branch.json:/app/area_branch.json:ro
+      # 或者，如果您希望掛載整個 bin 目錄 (假設設定檔在 bin/ 下，且執行檔也在 /app)
+      # - ./bin/connection.json:/app/connection.json:ro
+      # - ./bin/area_branch.json:/app/area_branch.json:ro
+      # (可選) 如果您的應用程式日誌是寫到檔案，也可以將日誌目錄掛載出來
+      # volumes:
+      #   - ./app_logs:/app/logs # 假設應用程式日誌寫到容器的 /app/logs
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis_for_finance_quota
+    ports:
+      - "6666:6379" # 主機埠 6666 映射到容器 6379
+    command: redis-server --requirepass "sts" #
+    volumes:
+      - redis_app_data_compose:/data # 使用 Docker 具名資料卷進行資料持久化
+    restart: always
+
+volumes:
+  redis_app_data_compose: # 定義具名資料卷
