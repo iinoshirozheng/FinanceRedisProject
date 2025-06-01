@@ -1,0 +1,4 @@
+user default on >sts ~* &* +@all
+user sts on >financing ~* -@all +keys +get +info +@read
+user newweb on >sts ~* -@all +keys +get +info +@read
+user python on >sts ~* -@all +keys +get +info +@read

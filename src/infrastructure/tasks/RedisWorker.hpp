@@ -86,9 +86,16 @@ namespace finance::infrastructure::tasks
                             task.promise->set_value(Result<void, ErrorResult>::Err(ErrorResult{ErrorCode::UnexpectedError, "Missing summary data payload"}));
                         }
                         break;
-
                     case RedisOperationType::UPDATE_COMPANY_SUMMARY:
-                        task.promise->set_value(Result<void, ErrorResult>::Err(ErrorResult{ErrorCode::UnexpectedError, "Operation not implemented"}));
+                        if (task.summary_data_payload)
+                        {
+                            auto result = repository_->update(task.key);
+                            task.promise->set_value(result);
+                        }
+                        else
+                        {
+                            task.promise->set_value(Result<void, ErrorResult>::Err(ErrorResult{ErrorCode::UnexpectedError, "Missing summary data payload"}));
+                        }
                         break;
 
                     default:

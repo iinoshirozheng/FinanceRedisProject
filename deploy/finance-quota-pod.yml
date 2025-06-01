@@ -1,0 +1,85 @@
+# 檔案: pods-finance.yaml
+# Pod 1: Redis 資料庫 (更新版)
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: redis-pod
+spec:
+  containers:
+  - name: redis # 建議將容器名稱改回 redis，使其功能更明確
+    image: redis/redis-stack-server:latest
+    # --- 修改啟動指令 ---
+    # 不再使用 --requirepass，而是直接載入設定檔
+    args:
+      - redis-server
+      - /etc/redis/redis.conf
+    ports:
+    - containerPort: 6379
+      hostPort: 6666
+      protocol: TCP
+    volumeMounts:
+      # 掛載 Redis 的持久化資料目錄 (保持不變)
+    - name: redis-data
+      mountPath: /data
+      # --- 新增掛載 ---
+      # 將設定檔目錄掛載到容器的 /etc/redis
+    - name: redis-config
+      mountPath: /etc/redis
+      readOnly: true # 設定檔建議設為唯讀
+
+  volumes:
+    # Redis 的持久化資料儲存卷 (保持不變)
+  - name: redis-data
+    hostPath:
+      path: /Users/ray/Desktop/stock_quota/deploy/pod_data/redis/data
+      type: Directory
+    # --- 新增儲存卷 ---
+    # 定義一個指向主機上設定檔目錄的儲存卷
+  - name: redis-config
+    hostPath:
+      # 指向您剛剛建立設定檔的主機路徑 (建議使用絕對路徑)
+      path: /Users/ray/Desktop/stock_quota/deploy/pod_data/redis/conf
+      type: Directory
+
+  restartPolicy: Always
+
+---
+# "---" 是 YAML 的文件分隔符，用來在單一檔案中開始一個新的物件定義。
+
+#======================================================================
+# Pod 2: Service 應用程式
+#======================================================================
+
+apiVersion: v1
+kind: Pod
+metadata:
+  # 第二個 Pod 的名稱。
+  name: finance-stock-quota-pod
+spec:
+  containers:
+  - name: service
+    image: sinopac.io/sts/finance-stock-quota:latest
+    ports:
+    - containerPort: 9516
+      hostPort: 9516
+      protocol: TCP
+    volumeMounts:
+    - name: connection-config
+      mountPath: /app/connection.json
+      # readOnly: true 將掛載的儲存卷設定為唯讀，防止容器修改來源檔案。
+      readOnly: true
+    - name: area-branch-config
+      mountPath: /app/area_branch.json
+      readOnly: true
+  volumes:
+  - name: connection-config
+    hostPath:
+      path: /Users/ray/Desktop/stock_quota/deploy/pod_data/service/conf/connection.json
+      # type: File 明確告訴系統，來源路徑是一個單一的檔案。
+      type: File
+  - name: area-branch-config
+    hostPath:
+      path: /Users/ray/Desktop/stock_quota/deploy/pod_data/service/conf/area_branch.json
+      type: File
+  restartPolicy: Always

@@ -3,7 +3,7 @@
 # --- Stage 1: Builder ---
 # 使用您上面定義的、已包含預編譯第三方函式庫和設定好環境變數的 Builder Image
 # 假設您將上面的 Containerfile.builder 建置成了名為 my_builder_with_env:latest 的映像檔
-FROM sinopac/cpp-builder:latest AS builder
+FROM sinopac.io/cpp-builder:latest AS builder
 
 WORKDIR /app
 

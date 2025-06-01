@@ -1,0 +1,6 @@
+{
+    "redis_url": "tcp://redis-pod:6379",
+    "server_port": 9516,
+    "socket_timeout_ms": 5000,
+    "redis_password": "sts"
+}
