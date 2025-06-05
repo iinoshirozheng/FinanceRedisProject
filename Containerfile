@@ -21,7 +21,7 @@ RUN ./run.sh --build-only --third-party-dir /opt/third_party
 
 # --- Stage 2: Runner ---
 # ... (與之前類似，從 Builder 的 ${THIRD_PARTY_DIR_ENV}/lib 或 ${DOWNLOAD_TARGET_DIR}/lib 複製 .so 檔案) ...
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+FROM registry.access.redhat.com/ubi9/ubi:latest
 WORKDIR /app
 COPY --from=builder /app/bin/finance_stock_quota ./finance_stock_quota
 # RUN microdnf install -y libstdc++ shadow-utils && microdnf clean all
